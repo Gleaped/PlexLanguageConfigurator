@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plex Language Configurator</title>
+<style>
+  :root { --bg:#f6f6f4; --card:#fff; --text:#1d1d1b; --muted:#6b6b66; --line:#e2e1dc;
+          --accent:#c98a00; --accent-text:#fff; --warn:#a15c00; --ok:#2f7d32; --err:#b3261e; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#151514; --card:#1f1f1d; --text:#ecebe6; --muted:#a3a29b; --line:#34332f;
+            --accent:#e5a00d; --accent-text:#1d1d1b; --warn:#f0b35a; --ok:#7cc47f; --err:#f2827a; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font:15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  p.sub { color: var(--muted); margin: 0 0 24px; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+            padding: 16px; margin-bottom: 16px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 12px; }
+  label { display:block; font-weight:600; margin: 12px 0 4px; }
+  select, input, button { font: inherit; color: inherit; }
+  select, input { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px;
+                  background: var(--bg); }
+  button { padding: 8px 16px; border-radius: 6px; border: 1px solid var(--line);
+           background: var(--bg); cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  .row { display:flex; gap: 8px; }
+  .row input { flex: 1; }
+  ul.results { list-style:none; padding:0; margin: 12px 0 0; }
+  ul.results li button { width:100%; text-align:left; border:none; border-bottom: 1px solid var(--line);
+                         border-radius:0; background:none; padding: 10px 4px; }
+  ul.results li button:hover { background: var(--bg); }
+  .meta { color: var(--muted); font-size: 13px; }
+  .actions { display:flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+  .msg { margin-top: 12px; }
+  .msg.err { color: var(--err); }
+  .ok { color: var(--ok); font-weight: 600; }
+  .warn { color: var(--warn); font-weight: 600; }
+  details { margin-top: 6px; }
+  details ul { margin: 6px 0 0; padding-left: 20px; color: var(--muted); font-size: 13px; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Plex Language Configurator</h1>
+  <p class="sub">Set audio and subtitle language for a whole series or movie, for one user.</p>
+
+  <section>
+    <h2>1. User</h2>
+    <select id="user"><option>Loading…</option></select>
+  </section>
+
+  <section>
+    <h2>2. Series or movie</h2>
+    <form class="row" id="searchForm">
+      <input id="q" placeholder="Search titles" autocomplete="off">
+      <button type="submit">Search</button>
+    </form>
+    <ul class="results" id="results"></ul>
+  </section>
+
+  <section id="langSection" class="hidden">
+    <h2>3. Languages</h2>
+    <div id="titleInfo"></div>
+    <label for="audio">Audio</label>
+    <select id="audio"></select>
+    <label for="subs">Subtitles</label>
+    <select id="subs"></select>
+    <div class="actions">
+      <button id="preview">Preview</button>
+      <button id="apply" class="primary">Apply</button>
+    </div>
+    <div id="out" class="msg"></div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let current = null; // { key, title }
+
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  const data = await res.json().catch(() => ({ error: res.statusText }));
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function showError(el, e) { el.className = 'msg err'; el.textContent = e.message; }
+
+async function loadUsers() {
+  try {
+    const users = await api('/api/users');
+    $('user').innerHTML = users.map(u =>
+      `<option value="${esc(u.title)}">${esc(u.title)}${u.admin ? ' (admin)' : ''}</option>`).join('');
+  } catch (e) { $('user').innerHTML = `<option>Error: ${esc(e.message)}</option>`; }
+}
+
+$('user').addEventListener('change', () => { if (current) selectTitle(current); });
+
+$('searchForm').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const q = $('q').value.trim();
+  if (!q) return;
+  $('results').innerHTML = '<li class="meta">Searching…</li>';
+  try {
+    const items = await api(`/api/search?user=${encodeURIComponent($('user').value)}&q=${encodeURIComponent(q)}`);
+    $('results').innerHTML = items.length ? '' : '<li class="meta">No matches.</li>';
+    for (const it of items) {
+      const li = document.createElement('li');
+      const b = document.createElement('button');
+      b.innerHTML = `${esc(it.title)} <span class="meta">${it.year ?? ''} · ${it.type === 'show' ? 'Series' : 'Movie'}</span>`;
+      b.onclick = () => selectTitle(it);
+      li.appendChild(b);
+      $('results').appendChild(li);
+    }
+  } catch (e) { $('results').innerHTML = `<li class="msg err">${esc(e.message)}</li>`; }
+});
+
+async function selectTitle(it) {
+  current = it;
+  $('langSection').classList.remove('hidden');
+  $('titleInfo').innerHTML = `<strong>${esc(it.title)}</strong> <span class="meta">loading languages…</span>`;
+  $('audio').innerHTML = $('subs').innerHTML = '';
+  $('out').textContent = '';
+  setBusy(true);
+  try {
+    const d = await api(`/api/languages?user=${encodeURIComponent($('user').value)}&key=${it.key}`);
+    const fmt = (o) => o.count === o.total ? o.name : `${o.name} (${o.count}/${o.total})`;
+    $('titleInfo').innerHTML = `<strong>${esc(d.title)}</strong> <span class="meta">${d.total} ${d.type === 'movie' ? 'file' : 'episodes'}</span>`;
+    $('audio').innerHTML = '<option value="">Don\'t change</option>' +
+      d.audio.map(o => `<option value="${esc(o.code)}">${esc(fmt(o))}</option>`).join('');
+    $('subs').innerHTML = '<option value="">Don\'t change</option><option value="off">Off</option>' +
+      d.subtitles.map(o => `<option value="${esc(o.code)}">${esc(fmt(o))}</option>`).join('');
+  } catch (e) { showError($('out'), e); }
+  setBusy(false);
+}
+
+function setBusy(b) { $('preview').disabled = $('apply').disabled = b; }
+
+function describe(kind, r, total) {
+  if (!r) return '';
+  const all = r.matched === total;
+  const head = `<div><span class="${all ? 'ok' : 'warn'}">${kind}: ${r.matched} of ${total}</span></div>`;
+  if (!r.missing.length) return head;
+  return head + `<details><summary>${r.missing.length} without this language (left unchanged)</summary><ul>` +
+    r.missing.map(m => `<li>${esc(m)}</li>`).join('') + '</ul></details>';
+}
+
+async function run(dry) {
+  const audio = $('audio').value, subtitles = $('subs').value;
+  const out = $('out');
+  if (!audio && !subtitles) { out.className = 'msg'; out.textContent = 'Pick an audio or subtitle language first.'; return; }
+  if (!dry && !confirm(`Apply to "${current.title}" for ${$('user').value}?`)) return;
+  setBusy(true);
+  out.className = 'msg'; out.textContent = dry ? 'Checking…' : 'Applying…';
+  try {
+    const r = await api('/api/apply', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user: $('user').value, key: current.key, audio, subtitles, dry_run: dry }) });
+    out.innerHTML = describe('Audio', r.audio, r.total) + describe('Subtitles', r.subtitles, r.total) +
+      `<p>${dry ? `Preview only: ${r.files} file(s) would be updated.` : `<span class="ok">Done: ${r.updated} file(s) updated.</span>`}</p>`;
+  } catch (e) { showError(out, e); }
+  setBusy(false);
+}
+$('preview').onclick = () => run(true);
+$('apply').onclick = () => run(false);
+
+loadUsers();
+</script>
+</body>
+</html>

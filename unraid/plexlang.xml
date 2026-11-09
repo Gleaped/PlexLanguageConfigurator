@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>PlexLanguageConfigurator</Name>
+  <Repository>ghcr.io/gleaped/plexlanguageconfigurator:latest</Repository>
+  <Registry>https://github.com/Gleaped/PlexLanguageConfigurator/pkgs/container/plexlanguageconfigurator</Registry>
+  <Network>bridge</Network>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/Gleaped/PlexLanguageConfigurator/issues</Support>
+  <Project>https://github.com/Gleaped/PlexLanguageConfigurator</Project>
+  <Overview>Set the audio and subtitle language for a whole series or movie at once, for any Plex Home user. Shows how many episodes have each language before applying.</Overview>
+  <Category>MediaServer:Video Tools:</Category>
+  <WebUI>http://[IP]:[PORT:8080]/</WebUI>
+  <Icon>https://raw.githubusercontent.com/plexinc/pms-docker/master/img/plex-server.png</Icon>
+  <Config Name="Web UI port" Target="8080" Default="8080" Mode="tcp" Description="Port for the web UI." Type="Port" Display="always" Required="true" Mask="false">8080</Config>
+  <Config Name="Plex URL" Target="PLEX_URL" Default="http://192.168.1.10:32400" Description="Address of your Plex server as seen from this container, e.g. http://UNRAID-IP:32400" Type="Variable" Display="always" Required="true" Mask="false">http://192.168.1.10:32400</Config>
+  <Config Name="Plex admin token" Target="PLEX_TOKEN" Default="" Description="The Plex server owner's X-Plex-Token. Needed to act on behalf of Home users." Type="Variable" Display="always" Required="true" Mask="true"></Config>
+</Container>

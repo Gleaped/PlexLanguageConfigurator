@@ -5,6 +5,7 @@
     plexlang languages "Breaking Bad" --user Alice
     plexlang set "Breaking Bad" --user Alice --audio ita --subs eng --dry-run
     plexlang set "Breaking Bad" --user Alice --audio ita --subs off
+    plexlang web --port 8080
 
 Connection settings come from --url/--token or PLEX_URL/PLEX_TOKEN.
 """
@@ -93,6 +94,15 @@ def cmd_set(args):
     print(f"\nUpdated {updated} file(s) of '{title.title}' for {user.title}.")
 
 
+def cmd_web(args):
+    from . import web
+
+    if not args.url or not args.token:
+        sys.exit("Set PLEX_URL and PLEX_TOKEN (or pass --url and --token).")
+    os.environ["PLEX_URL"], os.environ["PLEX_TOKEN"] = args.url, args.token
+    web.serve(host=args.host, port=args.port)
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="plexlang", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -105,6 +115,11 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("search", help="Find shows and movies")
     s.add_argument("query")
     s.set_defaults(func=cmd_search)
+
+    w = sub.add_parser("web", help="Start the web UI")
+    w.add_argument("--host", default=os.environ.get("HOST", "0.0.0.0"))
+    w.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8080")))
+    w.set_defaults(func=cmd_web)
 
     for name, func, helptext in (
         ("languages", cmd_languages, "Show available languages with episode counts"),
