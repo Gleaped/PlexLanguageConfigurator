@@ -7,7 +7,7 @@ name = "plexlang"
 version = "0.1.0"
 description = "Bulk-assign audio and subtitle languages per series or movie for Plex Home users"
 requires-python = ">=3.10"
-dependencies = ["plexapi>=4.15,<5"]
+dependencies = ["plexapi>=4.15,<5", "flask>=3,<4", "waitress>=3,<4"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
@@ -17,3 +17,6 @@ plexlang = "plexlang.cli:main"
 
 [tool.setuptools]
 packages = ["plexlang"]
+
+[tool.setuptools.package-data]
+plexlang = ["static/*"]

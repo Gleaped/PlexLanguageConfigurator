@@ -4,7 +4,7 @@ Set the audio and subtitle language for a whole series (or a movie) in one go, f
 
 Plex remembers your audio and subtitle choice per file, so switching a 100-episode show to Italian audio normally means 100 clicks. This tool lets you pick the language once per series, and it applies it to every episode that has that language. It tells you how many episodes have each language, for example `Italiano (ita) - 38 of 42 episodes`, and lists the episodes that don't.
 
-> Status: step 1 of 3, the command line tool. A web UI and a Docker image for Unraid come next.
+> Status: command line tool and web UI are done. A Docker image for Unraid comes next.
 
 ## Setup
 
@@ -18,7 +18,17 @@ export PLEX_URL=http://192.168.1.10:32400
 export PLEX_TOKEN=your-admin-token
 ```
 
-## Usage
+## Web UI
+
+```bash
+plexlang web --port 8080
+```
+
+Open `http://<host>:8080`, pick a user, search for a series or movie, choose the audio and subtitle language, then **Preview** to see how many episodes have it (and which don't) before you **Apply**. Languages that aren't in every episode show a count, like `Italiano (38/42)`.
+
+The web UI has no login of its own: anyone who can reach it can change language settings for your Home users, so keep it on your local network.
+
+## Command line
 
 ```bash
 # Who can I configure? (admin + Plex Home users)
