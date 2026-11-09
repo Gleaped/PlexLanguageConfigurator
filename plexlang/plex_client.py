@@ -48,11 +48,33 @@ def as_user(plex: PlexServer, user: HomeUser) -> PlexServer:
     return plex.switchUser(user.title)
 
 
+
 def search(plex: PlexServer, query: str) -> list:
-    """Shows and movies whose title matches the query."""
+    """Search accessible movie and TV sections individually.
+
+    Avoid PlexAPI's global /library/all endpoint. Section-level
+    searches use /library/sections/{sectionId}/all and respect
+    the library sections accessible to the authenticated user.
+    """
     results = []
-    for libtype in ("show", "movie"):
-        results.extend(plex.library.search(title=query, libtype=libtype))
+    seen = set()
+
+    for section in plex.library.sections():
+        if section.type not in ("show", "movie"):
+            continue
+
+        matches = section.search(
+            title=query,
+            libtype=section.type,
+        )
+
+        for item in matches:
+            rating_key = str(item.ratingKey)
+
+            if rating_key not in seen:
+                seen.add(rating_key)
+                results.append(item)
+
     return results
 
 
