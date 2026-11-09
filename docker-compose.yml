@@ -1,0 +1,12 @@
+services:
+  plexlang:
+    image: ghcr.io/gleaped/plexlanguageconfigurator:latest
+    # Or build locally instead of pulling:
+    # build: .
+    container_name: plexlang
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      PLEX_URL: "http://192.168.1.10:32400"   # your Plex server, as seen from this container
+      PLEX_TOKEN: "change-me"                  # admin Plex token

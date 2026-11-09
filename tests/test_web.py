@@ -44,6 +44,10 @@ def test_index_served(client):
     assert r.status_code == 200 and b"Plex Language Configurator" in r.data
 
 
+def test_healthz_does_not_touch_plex(client):
+    assert client.get("/healthz").data == b"ok"
+
+
 def test_users_and_search(client):
     assert client.get("/api/users").json == [{"title": "Admin", "admin": True},
                                              {"title": "Alice", "admin": False}]
@@ -74,3 +78,16 @@ def test_dry_run_changes_nothing_then_apply(client):
 def test_unknown_user_is_404(client):
     r = client.get("/api/languages?user=Bob&key=42")
     assert r.status_code == 404 and "Bob" in r.json["error"]
+
+
+def test_plex_unreachable_gives_clear_error(monkeypatch):
+    import requests
+
+    session = web.PlexSession("http://nowhere:32400", "t")
+
+    def boom(*a, **k):
+        raise requests.exceptions.ConnectionError("refused")
+
+    monkeypatch.setattr(session, "_connect", boom)
+    r = web.create_app(session).test_client().get("/api/users")
+    assert r.status_code == 502 and "http://nowhere:32400" in r.json["error"]

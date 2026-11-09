@@ -7,7 +7,9 @@ import threading
 import time
 from importlib import resources
 
+import requests
 from flask import Flask, jsonify, request
+from plexapi.exceptions import Unauthorized
 
 from . import core, plex_client
 
@@ -72,6 +74,14 @@ def create_app(session: PlexSession | None = None) -> Flask:
     def not_found(e):
         return jsonify(error=str(e)), 404
 
+    @app.errorhandler(requests.exceptions.ConnectionError)
+    def unreachable(e):
+        return jsonify(error=f"Can't reach Plex at {session.url}. Check PLEX_URL. ({e.__class__.__name__})"), 502
+
+    @app.errorhandler(Unauthorized)
+    def unauthorized(e):
+        return jsonify(error="Plex rejected the token. Check PLEX_TOKEN is the server owner's token."), 502
+
     @app.errorhandler(Exception)
     def failed(e):
         code = getattr(e, "code", 500)
@@ -82,6 +92,10 @@ def create_app(session: PlexSession | None = None) -> Flask:
     @app.get("/")
     def index():
         return resources.files("plexlang").joinpath("static/index.html").read_text(encoding="utf-8")
+
+    @app.get("/healthz")
+    def healthz():
+        return "ok"
 
     @app.get("/api/users")
     def users():
