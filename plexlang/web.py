@@ -12,15 +12,47 @@ from flask import Flask, jsonify, request
 from plexapi.exceptions import Unauthorized
 
 from . import core, plex_client
+from .bazarr_client import BazarrClient, BazarrError
 
 CACHE_SECONDS = 300
-BROWSE_CACHE_SECONDS = 600
+BROWSE_CACHE_SECONDS = 86400
 
 
 def _label(item) -> str:
     if getattr(item, "type", None) == "episode":
         return f"S{item.parentIndex:02}E{item.index:02} {item.title}"
     return item.title
+
+
+def _plex_external_ids(title) -> dict[str, list[str]]:
+    """Extract stable IMDb/TVDB/TMDB identifiers from Plex GUID metadata."""
+    import re
+
+    values = []
+    for attr in ("guid", "guids"):
+        raw = getattr(title, attr, None)
+        if callable(raw):
+            try:
+                raw = raw()
+            except Exception:
+                raw = None
+        if raw:
+            values.extend(raw if isinstance(raw, (list, tuple, set)) else [raw])
+    found = {"imdb": [], "tvdb": [], "tmdb": []}
+    for value in values:
+        text = str(getattr(value, "id", value) or "").strip()
+        match = re.search(r"(?:^|[/:.])((?:imdb|tvdb|tmdb))://?([^/?#]+)", text, re.I)
+        if not match:
+            match = re.search(r"(imdb|tvdb|tmdb)[:/]+([^/?#]+)", text, re.I)
+        if match:
+            kind, identifier = match.group(1).lower(), match.group(2)
+            if identifier not in found[kind]:
+                found[kind].append(identifier)
+    return found
+
+
+def _normal_title(value) -> str:
+    return " ".join(str(value or "").casefold().split())
 
 
 def _options(options):
@@ -31,8 +63,10 @@ def _options(options):
 class PlexSession:
     """Holds the admin connection and caches per-user connections and loaded titles."""
 
-    def __init__(self, url: str, token: str, connect=plex_client.connect):
+    def __init__(self, url: str, token: str, connect=plex_client.connect,
+                 bazarr: BazarrClient | None = None):
         self.url, self.token, self._connect = url, token, connect
+        self.bazarr = bazarr
         self._admin = None
         self._users: dict[str, object] = {}
         self._items: dict[tuple[str, str], tuple[float, object, list]] = {}
@@ -95,6 +129,7 @@ class PlexSession:
                             "title": title.title,
                             "year": getattr(title, "year", None),
                             "type": title.type,
+                            "ids": _plex_external_ids(title),
                             "total": summary.total,
                             "audio": [
                                 {"code": o.code, "name": o.name, "count": o.count,
@@ -109,8 +144,11 @@ class PlexSession:
                         # One unavailable item must not prevent browsing the rest.
                         errors += 1
 
+            built_at = int(time.time())
             index = {"titles": titles, "scanned": len(seen), "indexed": len(titles),
-                     "errors": errors, "built_at": int(time.time())}
+                     "errors": errors, "built_at": built_at,
+                     "expires_at": built_at + BROWSE_CACHE_SECONDS,
+                     "cache_seconds": BROWSE_CACHE_SECONDS}
             self._browse[user] = (time.time(), index)
             return index
 
@@ -121,7 +159,10 @@ def create_app(session: PlexSession | None = None) -> Flask:
         url, token = os.environ.get("PLEX_URL"), os.environ.get("PLEX_TOKEN")
         if not url or not token:
             raise SystemExit("Set PLEX_URL and PLEX_TOKEN.")
-        session = PlexSession(url, token)
+        bazarr_url = os.environ.get("BAZARR_URL")
+        bazarr_key = os.environ.get("BAZARR_API_KEY")
+        bazarr = BazarrClient(bazarr_url, bazarr_key) if bazarr_url and bazarr_key else None
+        session = PlexSession(url, token, bazarr=bazarr)
     app.config["plex"] = session
 
     @app.errorhandler(LookupError)
@@ -185,7 +226,9 @@ def create_app(session: PlexSession | None = None) -> Flask:
         languages = sorted(aggregate.values(), key=lambda x: (-x["titles"], x["name"].lower()))
         return jsonify(languages=languages, scanned=index["scanned"],
                        indexed=index["indexed"], errors=index["errors"],
-                       built_at=index["built_at"])
+                       built_at=index["built_at"], expires_at=index["expires_at"],
+                       cache_seconds=index["cache_seconds"],
+                       bazarr_configured=session.bazarr is not None)
 
     @app.get("/api/browse")
     def browse():
@@ -213,10 +256,103 @@ def create_app(session: PlexSession | None = None) -> Flask:
                     "count": option["count"], "total": option["total"],
                     "complete": option["count"] == option["total"],
                 })
-        results.sort(key=lambda x: (x["title"].lower(), x["year"] or 0))
+        for result in results:
+            result["percentage"] = round((result["count"] / result["total"] * 100), 2) if result["total"] else 0
+        sort_by = request.args.get("sort", "title")
+        sort_order = request.args.get("order", "asc")
+        allowed_sorts = {"title", "episodes", "percentage"}
+        if sort_by not in allowed_sorts or sort_order not in ("asc", "desc"):
+            return jsonify(error="Invalid sort or order."), 400
+        if sort_by in ("episodes", "percentage") and media_type == "movie":
+            return jsonify(error="Episode-count and coverage sorting apply to series."), 400
+        reverse = sort_order == "desc"
+        if sort_by == "episodes":
+            results.sort(key=lambda x: (x["total"], x["title"].casefold()), reverse=reverse)
+        elif sort_by == "percentage":
+            results.sort(key=lambda x: (x["percentage"], x["total"], x["title"].casefold()), reverse=reverse)
+        else:
+            results.sort(key=lambda x: (x["title"].casefold(), x["year"] or 0), reverse=reverse)
         return jsonify(results=results, scanned=index["scanned"],
                        indexed=index["indexed"], errors=index["errors"],
-                       built_at=index["built_at"])
+                       built_at=index["built_at"], expires_at=index["expires_at"],
+                       cache_seconds=index["cache_seconds"])
+
+    @app.post("/api/browse/bazarr-search")
+    def bazarr_search():
+        if session.bazarr is None:
+            return jsonify(error="Bazarr is not configured. Set BAZARR_URL and BAZARR_API_KEY."), 503
+        body = request.get_json(force=True)
+        user = str(body.get("user") or "").strip()
+        language = str(body.get("language") or "").strip().lower()
+        kind = body.get("kind", "audio")
+        media_type = body.get("type", "all")
+        if kind != "audio":
+            return jsonify(error="Bazarr bulk search must be scoped by an audio language."), 400
+        if not user or not language:
+            return jsonify(error="user and audio language are required."), 400
+        if media_type not in ("all", "movie", "show"):
+            return jsonify(error="type must be all, movie or show."), 400
+
+        index = session.browse_index(user)
+        selected = []
+        for title in index["titles"]:
+            if media_type != "all" and title["type"] != media_type:
+                continue
+            if any(o["code"].lower() == language for o in title["audio"]):
+                selected.append(title)
+        if not selected:
+            return jsonify(queued=0, matched=0, unmatched=[], failures=[],
+                           message="No titles in the cached Plex index have this audio language.")
+
+        try:
+            bazarr_series, bazarr_movies = session.bazarr.catalog()
+        except BazarrError as exc:
+            return jsonify(error=str(exc)), 502
+
+        def id_set(row, *keys):
+            return {str(row.get(k)).strip().lower() for k in keys
+                    if row.get(k) not in (None, "", 0)}
+
+        by_external = {"show": {}, "movie": {}}
+        by_title = {"show": {}, "movie": {}}
+        for media, rows, id_fields, id_field in (
+            ("show", bazarr_series, ("imdbId", "tvdbId"), "sonarrSeriesId"),
+            ("movie", bazarr_movies, ("imdbId",), "radarrId"),
+        ):
+            for row in rows:
+                for identifier in id_set(row, *id_fields):
+                    by_external[media].setdefault(identifier, row.get(id_field))
+                title_key = (_normal_title(row.get("title")), str(row.get("year") or ""))
+                if title_key[0]:
+                    by_title[media].setdefault(title_key, []).append(row.get(id_field))
+
+        queued, unmatched, failures = [], [], []
+        for title in selected:
+            media = title["type"]
+            ids = title.get("ids") or {}
+            candidates = [str(x).lower() for key in (("imdb", "tvdb") if media == "show" else ("imdb",))
+                          for x in ids.get(key, [])]
+            bazarr_id = next((by_external[media][x] for x in candidates
+                              if x in by_external[media] and by_external[media][x]), None)
+            if not bazarr_id:
+                title_key = (_normal_title(title.get("title")), str(title.get("year") or ""))
+                exact_matches = [x for x in by_title[media].get(title_key, []) if x]
+                if len(exact_matches) == 1:
+                    bazarr_id = exact_matches[0]
+            if not bazarr_id:
+                unmatched.append({"title": title["title"], "type": media,
+                                  "reason": "No unique Bazarr match by external ID or exact title/year."})
+                continue
+            try:
+                session.bazarr.search_missing(media, int(bazarr_id))
+                queued.append({"title": title["title"], "type": media})
+            except (BazarrError, ValueError) as exc:
+                failures.append({"title": title["title"], "error": str(exc)})
+
+        return jsonify(queued=len(queued), matched=len(selected), results=queued,
+                       unmatched=unmatched, failures=failures,
+                       audio_language=language,
+                       note="Bazarr searches using the language profile already assigned to each title.")
 
     @app.get("/api/languages")
     def languages():

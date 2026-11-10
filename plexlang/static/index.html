@@ -45,7 +45,7 @@
   .hidden { display: none; }
   .tabs { display:flex; gap:8px; margin: 0 0 16px; }
   .tabs button[aria-selected="true"] { background:var(--accent); color:var(--accent-text); border-color:var(--accent); font-weight:600; }
-  .browse-controls { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .browse-controls { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:10px; }
   .browse-controls label { margin-top:4px; }
   .browse-meta { color:var(--muted); font-size:13px; margin-top:10px; }
   .result-row { display:flex; justify-content:space-between; align-items:center; gap:12px; }
@@ -94,11 +94,24 @@
         <label for="browseLanguage">Language</label>
         <select id="browseLanguage" disabled><option value="">Load languages first</option></select>
       </div>
+      <div id="sortWrap">
+        <label for="browseSort">Sort by</label>
+        <select id="browseSort"><option value="title">Title</option></select>
+      </div>
+      <div>
+        <label for="browseOrder">Order</label>
+        <select id="browseOrder"><option value="asc">Ascending</option><option value="desc">Descending</option></select>
+      </div>
       <div style="align-self:end">
-        <button id="refreshBrowse" type="button">Refresh library index</button>
+        <button id="refreshBrowse" type="button">Force refresh index</button>
       </div>
     </div>
     <div id="browseMeta" class="browse-meta">Open this page to index the selected user's library. The first scan can take a while.</div>
+    <div class="actions">
+      <button id="bazarrSearch" type="button" disabled>Search missing subtitles in Bazarr</button>
+    </div>
+    <p id="bazarrHint" class="meta">Available when browsing audio languages and Bazarr is configured. Bazarr uses each title's existing language profile and may download matches.</p>
+    <div id="bazarrResult" class="msg"></div>
     <ul class="results" id="browseResults"></ul>
   </section>
 
@@ -220,9 +233,22 @@ function showPage(page) {
 $('searchTab').onclick = () => showPage('search');
 $('browseTab').onclick = () => showPage('browse');
 $('browseKind').onchange = () => loadBrowseLanguages(false);
-$('browseType').onchange = () => loadBrowseResults();
+$('browseType').onchange = () => { updateBrowseSortOptions(); loadBrowseResults(); };
 $('browseLanguage').onchange = () => loadBrowseResults();
+$('browseSort').onchange = () => loadBrowseResults();
+$('browseOrder').onchange = () => loadBrowseResults();
 $('refreshBrowse').onclick = () => loadBrowseLanguages(true);
+$('bazarrSearch').onclick = () => runBazarrSearch();
+
+function updateBrowseSortOptions() {
+  const isShows = $('browseType').value === 'show';
+  const currentSort = $('browseSort').value;
+  $('browseSort').innerHTML = '<option value="title">Title</option>' + (isShows
+    ? '<option value="episodes">Total episode count</option><option value="percentage">Language coverage (%)</option>'
+    : '');
+  if ([...$('browseSort').options].some(o => o.value === currentSort)) $('browseSort').value = currentSort;
+  else $('browseSort').value = 'title';
+}
 
 async function loadBrowseLanguages(refresh) {
   const user = $('user').value;
@@ -238,11 +264,18 @@ async function loadBrowseLanguages(refresh) {
     $('browseLanguage').innerHTML = '<option value="">Choose a language…</option>' +
       d.languages.map(o => `<option value="${esc(o.code)}">${esc(o.name)} (${esc(o.code)}) · ${o.titles} titles</option>`).join('');
     $('browseLanguage').disabled = !d.languages.length;
-    $('browseMeta').textContent = `Indexed ${d.indexed} of ${d.scanned} titles. ${d.errors ? `${d.errors} item(s) could not be inspected.` : 'No indexing errors.'} Index is cached for 10 minutes.`;
+    const built = new Date(d.built_at * 1000).toLocaleString();
+    $('browseMeta').textContent = `Indexed ${d.indexed} of ${d.scanned} titles. ${d.errors ? `${d.errors} item(s) could not be inspected.` : 'No indexing errors.'} Cached for 24 hours (built ${built}).`;
+    $('bazarrSearch').disabled = !d.bazarr_configured || kind !== 'audio' || !d.languages.length || !$('browseLanguage').value;
+    $('bazarrHint').textContent = !d.bazarr_configured
+      ? 'Bazarr integration is not configured. Set BAZARR_URL and BAZARR_API_KEY in the container.'
+      : 'Searches only titles matching the selected Plex audio language. Bazarr uses each title’s existing language profile and may download matching subtitles.';
+    updateBrowseSortOptions();
     if (!d.languages.length) $('browseMeta').textContent += ' No language streams were found.';
   } catch (e) {
     $('browseLanguage').innerHTML = '<option value="">Unable to load languages</option>';
     $('browseMeta').textContent = e.message;
+    $('bazarrSearch').disabled = true;
   }
 }
 
@@ -250,7 +283,8 @@ async function loadBrowseResults() {
   const language = $('browseLanguage').value;
   if (!language) { $('browseResults').innerHTML = ''; return; }
   const params = new URLSearchParams({ user: $('user').value, kind: $('browseKind').value,
-    language, type: $('browseType').value });
+    language, type: $('browseType').value, sort: $('browseSort').value,
+    order: $('browseOrder').value });
   $('browseResults').innerHTML = '<li class="meta">Finding matching titles…</li>';
   try {
     const d = await api(`/api/browse?${params}`);
@@ -267,14 +301,41 @@ async function loadBrowseResults() {
       b.onclick = () => { showPage('search'); selectTitle(it); };
       const coverage = document.createElement('span');
       coverage.className = 'coverage';
-      coverage.textContent = it.type === 'show' ? `${it.count}/${it.total} episodes` : 'Available';
+      coverage.textContent = it.type === 'show'
+        ? `${it.count}/${it.total} episodes · ${it.percentage}%`
+        : 'Available';
       li.append(b, coverage);
       $('browseResults').appendChild(li);
     }
     $('browseMeta').textContent = `${d.results.length} matching title(s) found.`;
+    $('bazarrSearch').disabled = $('browseKind').value !== 'audio' || d.results.length === 0 || $('bazarrHint').textContent.startsWith('Bazarr integration is not configured');
   } catch (e) {
     $('browseResults').innerHTML = `<li class="msg err">${esc(e.message)}</li>`;
+    $('bazarrSearch').disabled = true;
   }
+}
+
+async function runBazarrSearch() {
+  const language = $('browseLanguage').value;
+  if (!language || $('browseKind').value !== 'audio') return;
+  const count = $('browseResults').querySelectorAll('li.result-row').length;
+  if (!count) return;
+  if (!confirm(`Ask Bazarr to search for missing subtitles for titles with ${language} audio? Bazarr may download subtitles according to each title's existing language profile.`)) return;
+  $('bazarrSearch').disabled = true;
+  $('bazarrResult').className = 'msg';
+  $('bazarrResult').textContent = 'Sending search requests to Bazarr…';
+  try {
+    const d = await api('/api/browse/bazarr-search', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user: $('user').value, kind: $('browseKind').value, language, type: $('browseType').value })
+    });
+    $('bazarrResult').className = 'msg';
+    $('bazarrResult').innerHTML = `<span class="ok">Bazarr search triggered for ${d.queued} of ${d.matched} matching title(s).</span>` +
+      (d.unmatched.length ? `<details><summary>${d.unmatched.length} not found in Bazarr</summary><ul>${d.unmatched.map(x => `<li>${esc(x.title)}: ${esc(x.reason)}</li>`).join('')}</ul></details>` : '') +
+      (d.failures.length ? `<details><summary>${d.failures.length} request(s) failed</summary><ul>${d.failures.map(x => `<li>${esc(x.title)}: ${esc(x.error)}</li>`).join('')}</ul></details>` : '') +
+      `<p class="meta">${esc(d.note)}</p>`;
+  } catch (e) { showError($('bazarrResult'), e); }
+  $('bazarrSearch').disabled = false;
 }
 
 loadUsers();
