@@ -43,6 +43,15 @@
   details { margin-top: 6px; }
   details ul { margin: 6px 0 0; padding-left: 20px; color: var(--muted); font-size: 13px; }
   .hidden { display: none; }
+  .tabs { display:flex; gap:8px; margin: 0 0 16px; }
+  .tabs button[aria-selected="true"] { background:var(--accent); color:var(--accent-text); border-color:var(--accent); font-weight:600; }
+  .browse-controls { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .browse-controls label { margin-top:4px; }
+  .browse-meta { color:var(--muted); font-size:13px; margin-top:10px; }
+  .result-row { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+  .result-row button { flex:1; }
+  .coverage { color:var(--muted); font-size:12px; white-space:nowrap; }
+  @media (max-width:520px) { .browse-controls { grid-template-columns:1fr; } }
 </style>
 </head>
 <body>
@@ -55,13 +64,42 @@
     <select id="user"><option>Loading…</option></select>
   </section>
 
-  <section>
+  <nav class="tabs" aria-label="Pages">
+    <button id="searchTab" type="button" aria-selected="true">Search & configure</button>
+    <button id="browseTab" type="button" aria-selected="false">Browse by language</button>
+  </nav>
+
+  <section id="searchSection">
     <h2>2. Series or movie</h2>
     <form class="row" id="searchForm">
       <input id="q" placeholder="Search titles" autocomplete="off">
       <button type="submit">Search</button>
     </form>
     <ul class="results" id="results"></ul>
+  </section>
+
+  <section id="browseSection" class="hidden">
+    <h2>Browse library by language</h2>
+    <p class="meta">Find every movie or series containing a selected audio or subtitle language. Select a result to configure it.</p>
+    <div class="browse-controls">
+      <div>
+        <label for="browseKind">Language type</label>
+        <select id="browseKind"><option value="audio">Audio</option><option value="subtitles">Subtitles</option></select>
+      </div>
+      <div>
+        <label for="browseType">Media type</label>
+        <select id="browseType"><option value="all">Movies and series</option><option value="movie">Movies only</option><option value="show">Series only</option></select>
+      </div>
+      <div>
+        <label for="browseLanguage">Language</label>
+        <select id="browseLanguage" disabled><option value="">Load languages first</option></select>
+      </div>
+      <div style="align-self:end">
+        <button id="refreshBrowse" type="button">Refresh library index</button>
+      </div>
+    </div>
+    <div id="browseMeta" class="browse-meta">Open this page to index the selected user's library. The first scan can take a while.</div>
+    <ul class="results" id="browseResults"></ul>
   </section>
 
   <section id="langSection" class="hidden">
@@ -100,7 +138,7 @@ async function loadUsers() {
   } catch (e) { $('user').innerHTML = `<option>Error: ${esc(e.message)}</option>`; }
 }
 
-$('user').addEventListener('change', () => { if (current) selectTitle(current); });
+$('user').addEventListener('change', () => { if (current) selectTitle(current); if (!$('browseSection').classList.contains('hidden')) loadBrowseLanguages(false); });
 
 $('searchForm').addEventListener('submit', async (ev) => {
   ev.preventDefault();
@@ -168,6 +206,76 @@ async function run(dry) {
 }
 $('preview').onclick = () => run(true);
 $('apply').onclick = () => run(false);
+
+
+function showPage(page) {
+  const browsing = page === 'browse';
+  $('searchSection').classList.toggle('hidden', browsing);
+  $('browseSection').classList.toggle('hidden', !browsing);
+  $('langSection').classList.add('hidden');
+  $('searchTab').setAttribute('aria-selected', String(!browsing));
+  $('browseTab').setAttribute('aria-selected', String(browsing));
+  if (browsing) loadBrowseLanguages(false);
+}
+$('searchTab').onclick = () => showPage('search');
+$('browseTab').onclick = () => showPage('browse');
+$('browseKind').onchange = () => loadBrowseLanguages(false);
+$('browseType').onchange = () => loadBrowseResults();
+$('browseLanguage').onchange = () => loadBrowseResults();
+$('refreshBrowse').onclick = () => loadBrowseLanguages(true);
+
+async function loadBrowseLanguages(refresh) {
+  const user = $('user').value;
+  const kind = $('browseKind').value;
+  $('browseLanguage').disabled = true;
+  $('browseLanguage').innerHTML = '<option value="">Indexing library…</option>';
+  $('browseResults').innerHTML = '';
+  $('browseMeta').textContent = refresh
+    ? 'Refreshing the language index. This may take several minutes for large libraries…'
+    : 'Loading the language index. The first scan can take several minutes…';
+  try {
+    const d = await api(`/api/browse/languages?user=${encodeURIComponent(user)}&kind=${kind}${refresh ? '&refresh=1' : ''}`);
+    $('browseLanguage').innerHTML = '<option value="">Choose a language…</option>' +
+      d.languages.map(o => `<option value="${esc(o.code)}">${esc(o.name)} (${esc(o.code)}) · ${o.titles} titles</option>`).join('');
+    $('browseLanguage').disabled = !d.languages.length;
+    $('browseMeta').textContent = `Indexed ${d.indexed} of ${d.scanned} titles. ${d.errors ? `${d.errors} item(s) could not be inspected.` : 'No indexing errors.'} Index is cached for 10 minutes.`;
+    if (!d.languages.length) $('browseMeta').textContent += ' No language streams were found.';
+  } catch (e) {
+    $('browseLanguage').innerHTML = '<option value="">Unable to load languages</option>';
+    $('browseMeta').textContent = e.message;
+  }
+}
+
+async function loadBrowseResults() {
+  const language = $('browseLanguage').value;
+  if (!language) { $('browseResults').innerHTML = ''; return; }
+  const params = new URLSearchParams({ user: $('user').value, kind: $('browseKind').value,
+    language, type: $('browseType').value });
+  $('browseResults').innerHTML = '<li class="meta">Finding matching titles…</li>';
+  try {
+    const d = await api(`/api/browse?${params}`);
+    $('browseResults').innerHTML = '';
+    if (!d.results.length) {
+      $('browseResults').innerHTML = '<li class="meta">No matching movies or series.</li>';
+      return;
+    }
+    for (const it of d.results) {
+      const li = document.createElement('li');
+      li.className = 'result-row';
+      const b = document.createElement('button');
+      b.innerHTML = `${esc(it.title)} <span class="meta">${it.year ?? ''} · ${it.type === 'show' ? 'Series' : 'Movie'}</span>`;
+      b.onclick = () => { showPage('search'); selectTitle(it); };
+      const coverage = document.createElement('span');
+      coverage.className = 'coverage';
+      coverage.textContent = it.type === 'show' ? `${it.count}/${it.total} episodes` : 'Available';
+      li.append(b, coverage);
+      $('browseResults').appendChild(li);
+    }
+    $('browseMeta').textContent = `${d.results.length} matching title(s) found.`;
+  } catch (e) {
+    $('browseResults').innerHTML = `<li class="msg err">${esc(e.message)}</li>`;
+  }
+}
 
 loadUsers();
 </script>

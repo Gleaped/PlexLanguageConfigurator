@@ -14,6 +14,7 @@ from plexapi.exceptions import Unauthorized
 from . import core, plex_client
 
 CACHE_SECONDS = 300
+BROWSE_CACHE_SECONDS = 600
 
 
 def _label(item) -> str:
@@ -35,7 +36,9 @@ class PlexSession:
         self._admin = None
         self._users: dict[str, object] = {}
         self._items: dict[tuple[str, str], tuple[float, object, list]] = {}
+        self._browse: dict[str, tuple[float, dict]] = {}
         self._lock = threading.Lock()
+        self._browse_lock = threading.Lock()
 
     def admin(self):
         if self._admin is None:
@@ -59,6 +62,57 @@ class PlexSession:
         items = plex_client.playable_items(plex, title)
         self._items[cache_key] = (time.time(), title, items)
         return title, items
+
+    def browse_index(self, user: str, refresh: bool = False) -> dict:
+        """Build/cache a per-user index of languages present in every movie/show."""
+        hit = self._browse.get(user)
+        if hit and not refresh and time.time() - hit[0] < BROWSE_CACHE_SECONDS:
+            return hit[1]
+
+        # Prevent simultaneous first-page requests from scanning the same library.
+        with self._browse_lock:
+            hit = self._browse.get(user)
+            if hit and not refresh and time.time() - hit[0] < BROWSE_CACHE_SECONDS:
+                return hit[1]
+
+            plex = self.user_server(user)
+            titles = []
+            seen = set()
+            errors = 0
+            for section in plex.library.sections():
+                if getattr(section, "type", None) not in ("movie", "show"):
+                    continue
+                for title in section.all():
+                    key = str(getattr(title, "ratingKey", ""))
+                    if not key or key in seen:
+                        continue
+                    seen.add(key)
+                    try:
+                        playable = plex_client.playable_items(plex, title)
+                        summary = core.summarize(playable)
+                        titles.append({
+                            "key": key,
+                            "title": title.title,
+                            "year": getattr(title, "year", None),
+                            "type": title.type,
+                            "total": summary.total,
+                            "audio": [
+                                {"code": o.code, "name": o.name, "count": o.count,
+                                 "total": o.total} for o in summary.audio
+                            ],
+                            "subtitles": [
+                                {"code": o.code, "name": o.name, "count": o.count,
+                                 "total": o.total} for o in summary.subtitles
+                            ],
+                        })
+                    except Exception:
+                        # One unavailable item must not prevent browsing the rest.
+                        errors += 1
+
+            index = {"titles": titles, "scanned": len(seen), "indexed": len(titles),
+                     "errors": errors, "built_at": int(time.time())}
+            self._browse[user] = (time.time(), index)
+            return index
 
 
 def create_app(session: PlexSession | None = None) -> Flask:
@@ -110,6 +164,59 @@ def create_app(session: PlexSession | None = None) -> Flask:
         results = plex_client.search(session.user_server(user), q)
         return jsonify([{"key": str(r.ratingKey), "title": r.title, "year": getattr(r, "year", None),
                          "type": r.type} for r in results])
+
+    @app.get("/api/browse/languages")
+    def browse_languages():
+        user = request.args["user"]
+        kind = request.args.get("kind", "audio")
+        if kind not in ("audio", "subtitles"):
+            return jsonify(error="kind must be 'audio' or 'subtitles'"), 400
+        index = session.browse_index(user, refresh=request.args.get("refresh") == "1")
+
+        aggregate = {}
+        for title in index["titles"]:
+            for option in title[kind]:
+                entry = aggregate.setdefault(option["code"], {
+                    "code": option["code"], "name": option["name"],
+                    "titles": 0, "items": 0,
+                })
+                entry["titles"] += 1
+                entry["items"] += option["count"]
+        languages = sorted(aggregate.values(), key=lambda x: (-x["titles"], x["name"].lower()))
+        return jsonify(languages=languages, scanned=index["scanned"],
+                       indexed=index["indexed"], errors=index["errors"],
+                       built_at=index["built_at"])
+
+    @app.get("/api/browse")
+    def browse():
+        user = request.args["user"]
+        kind = request.args.get("kind", "audio")
+        language = request.args.get("language", "").strip().lower()
+        media_type = request.args.get("type", "all")
+        if kind not in ("audio", "subtitles"):
+            return jsonify(error="kind must be 'audio' or 'subtitles'"), 400
+        if media_type not in ("all", "movie", "show"):
+            return jsonify(error="type must be 'all', 'movie' or 'show'"), 400
+        if not language:
+            return jsonify(error="language is required"), 400
+
+        index = session.browse_index(user, refresh=request.args.get("refresh") == "1")
+        results = []
+        for title in index["titles"]:
+            if media_type != "all" and title["type"] != media_type:
+                continue
+            option = next((o for o in title[kind] if o["code"].lower() == language), None)
+            if option:
+                results.append({
+                    "key": title["key"], "title": title["title"],
+                    "year": title["year"], "type": title["type"],
+                    "count": option["count"], "total": option["total"],
+                    "complete": option["count"] == option["total"],
+                })
+        results.sort(key=lambda x: (x["title"].lower(), x["year"] or 0))
+        return jsonify(results=results, scanned=index["scanned"],
+                       indexed=index["indexed"], errors=index["errors"],
+                       built_at=index["built_at"])
 
     @app.get("/api/languages")
     def languages():
