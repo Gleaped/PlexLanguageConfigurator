@@ -51,6 +51,13 @@
   .result-row { display:flex; justify-content:space-between; align-items:center; gap:12px; }
   .result-row button { flex:1; }
   .coverage { color:var(--muted); font-size:12px; white-space:nowrap; }
+  .profile-map { border:1px solid var(--line); border-radius:8px; padding:12px; margin-top:12px; }
+  .bulk-preview { border:1px solid var(--line); border-radius:8px; padding:12px; margin-top:12px; }
+  .bulk-item { display:grid; grid-template-columns:auto minmax(0,1fr); gap:8px; padding:9px 0; border-bottom:1px solid var(--line); }
+  .bulk-item:last-child { border-bottom:0; }
+  .bulk-item small { display:block; color:var(--muted); }
+  .status-pill { display:inline-block; border:1px solid var(--line); border-radius:20px; padding:2px 8px; font-size:11px; margin-left:6px; }
+  .suggestion { display:flex; justify-content:space-between; gap:10px; align-items:center; padding:6px 0; }
   @media (max-width:520px) { .browse-controls { grid-template-columns:1fr; } }
 </style>
 </head>
@@ -110,8 +117,27 @@
     <div class="actions">
       <button id="bazarrSearch" type="button" disabled>Search missing subtitles in Bazarr</button>
     </div>
-    <p id="bazarrHint" class="meta">Available when browsing audio languages and Bazarr is configured. Bazarr uses each title's existing language profile and may download matches.</p>
+    <p id="bazarrHint" class="meta">Available when browsing audio languages and Bazarr is configured. Configure a profile for the selected audio language, or leave it unchanged to retain each title's current Bazarr profile.</p>
+    <div id="bazarrProfileMap" class="profile-map hidden">
+      <label for="bazarrProfile">Bazarr subtitle profile for this audio language</label>
+      <select id="bazarrProfile"><option value="">Keep each title's existing profile</option></select>
+      <div class="actions">
+        <button id="saveBazarrMapping" type="button">Save language mapping</button>
+        <button id="removeBazarrMapping" type="button">Remove mapping</button>
+      </div>
+      <p id="bazarrMappingStatus" class="meta">Mappings are saved on the configurator server. Mount /data to persistent Unraid appdata to retain them across container replacement.</p>
+    </div>
+    <div id="bazarrSuggestion" class="profile-map hidden"></div>
     <div id="bazarrResult" class="msg"></div>
+    <div id="bazarrPreview" class="bulk-preview hidden">
+      <h3>Bulk operation preview</h3>
+      <p id="bazarrPreviewSummary" class="meta"></p>
+      <label><input id="bazarrSelectAll" type="checkbox" checked> Select all matched titles</label>
+      <div id="bazarrPreviewItems"></div>
+      <div class="actions"><button id="bazarrStartSelected" type="button" class="primary">Start selected searches</button></div>
+      <p class="meta">Profile changes affect the media item globally in Bazarr, not just the selected Plex Home user. Searches may download subtitles.</p>
+    </div>
+    <div id="bazarrJob" class="msg"><span id="bazarrJobText"></span><div class="actions"><button id="bazarrCancelJob" type="button" class="hidden">Cancel job</button><button id="bazarrRetryJob" type="button" class="hidden">Retry failed titles</button><button id="bazarrHistory" type="button">View job history</button></div><div id="bazarrJobDetails"></div></div>
     <ul class="results" id="browseResults"></ul>
   </section>
 
@@ -234,11 +260,109 @@ $('searchTab').onclick = () => showPage('search');
 $('browseTab').onclick = () => showPage('browse');
 $('browseKind').onchange = () => loadBrowseLanguages(false);
 $('browseType').onchange = () => { updateBrowseSortOptions(); loadBrowseResults(); };
-$('browseLanguage').onchange = () => loadBrowseResults();
+$('browseLanguage').onchange = () => { syncBazarrMappingSelection(); loadBrowseResults(); };
 $('browseSort').onchange = () => loadBrowseResults();
 $('browseOrder').onchange = () => loadBrowseResults();
 $('refreshBrowse').onclick = () => loadBrowseLanguages(true);
 $('bazarrSearch').onclick = () => runBazarrSearch();
+$('bazarrSelectAll').onchange = () => document.querySelectorAll('.bazarr-select-item').forEach(x => x.checked = $('bazarrSelectAll').checked);
+$('bazarrStartSelected').onclick = () => startSelectedBazarrJob();
+$('bazarrCancelJob').onclick = () => cancelBazarrJob();
+$('bazarrRetryJob').onclick = () => retryBazarrJob();
+$('bazarrHistory').onclick = () => loadBazarrHistory();
+$('saveBazarrMapping').onclick = () => saveBazarrMapping();
+$('removeBazarrMapping').onclick = () => removeBazarrMapping();
+
+let bazarrProfiles = [];
+let bazarrMappings = {};
+
+async function loadBazarrProfileOptions(configured) {
+  $('bazarrProfileMap').classList.add('hidden');
+  if (!configured || $('browseKind').value !== 'audio') return;
+  try {
+    const d = await api('/api/bazarr/profiles');
+    bazarrProfiles = d.profiles || [];
+    bazarrMappings = d.mappings || {};
+    $('bazarrProfile').innerHTML = "<option value=''>Keep each title's existing profile</option>" +
+      bazarrProfiles.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+    $('bazarrProfileMap').classList.remove('hidden');
+    $('bazarrMappingStatus').textContent = `Mappings saved on server: ${d.storage_path}. Mount /data to persistent Unraid appdata to retain them across container replacement.`;
+    syncBazarrMappingSelection();
+  } catch (e) {
+    $('bazarrHint').textContent = `Bazarr profile list could not be loaded: ${e.message}`;
+  }
+}
+
+function syncBazarrMappingSelection() {
+  const code = $('browseLanguage').value;
+  if (!code || !bazarrProfiles.length) return;
+  const mappedId = bazarrMappings[code] || '';
+  if (mappedId && ![...$('bazarrProfile').options].some(o => o.value === mappedId)) {
+    const stale = document.createElement('option');
+    stale.value = mappedId;
+    stale.textContent = `Unavailable Bazarr profile (ID ${mappedId}) — remove or replace mapping`;
+    $('bazarrProfile').appendChild(stale);
+  }
+  $('bazarrProfile').value = mappedId;
+  loadBazarrSuggestions(code);
+}
+
+async function loadBazarrSuggestions(code) {
+  const box = $('bazarrSuggestion');
+  box.classList.add('hidden');
+  if (!code || $('bazarrProfileMap').classList.contains('hidden')) return;
+  try {
+    const d = await api(`/api/bazarr/profile-suggestions?language=${encodeURIComponent(code)}`);
+    box.innerHTML = `<strong>Profile suggestions for ${esc(d.language_name)}</strong><p class="meta">${esc(d.note)}</p>`;
+    const matches = (d.suggestions || []).filter(x => x.contains_language);
+    if (!matches.length) {
+      box.innerHTML += '<p class="meta">No profile explicitly contains this language. Review profiles in Bazarr or choose one manually.</p>';
+    }
+    for (const item of matches) {
+      const row = document.createElement('div'); row.className = 'suggestion';
+      const label = document.createElement('span'); label.textContent = `${item.name} — ${item.reason}`;
+      const button = document.createElement('button'); button.type = 'button'; button.textContent = 'Use';
+      button.onclick = () => { $('bazarrProfile').value = item.id; };
+      row.append(label, button); box.appendChild(row);
+    }
+    box.classList.remove('hidden');
+  } catch (e) {
+    box.textContent = `Could not inspect profile contents: ${e.message}`;
+    box.classList.remove('hidden');
+  }
+}
+
+async function saveBazarrMapping() {
+  const code = $('browseLanguage').value;
+  if (!code) return;
+  const next = { ...bazarrMappings };
+  const profile = $('bazarrProfile').value;
+  if (profile) next[code] = profile; else delete next[code];
+  try {
+    const d = await api('/api/bazarr/profile-mappings', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mappings: next })
+    });
+    bazarrMappings = d.mappings || next;
+    $('bazarrMappingStatus').textContent = `Saved mapping for ${code}. It will apply to Bazarr media when you run the search.`;
+  } catch (e) { $('bazarrMappingStatus').textContent = e.message; }
+}
+
+async function removeBazarrMapping() {
+  const code = $('browseLanguage').value;
+  if (!code) return;
+  const next = { ...bazarrMappings };
+  delete next[code];
+  try {
+    const d = await api('/api/bazarr/profile-mappings', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mappings: next })
+    });
+    bazarrMappings = d.mappings || next;
+    $('bazarrProfile').value = '';
+    $('bazarrMappingStatus').textContent = `Removed mapping for ${code}. Existing per-title Bazarr profiles will be retained.`;
+  } catch (e) { $('bazarrMappingStatus').textContent = e.message; }
+}
 
 function updateBrowseSortOptions() {
   const isShows = $('browseType').value === 'show';
@@ -266,10 +390,12 @@ async function loadBrowseLanguages(refresh) {
     $('browseLanguage').disabled = !d.languages.length;
     const built = new Date(d.built_at * 1000).toLocaleString();
     $('browseMeta').textContent = `Indexed ${d.indexed} of ${d.scanned} titles. ${d.errors ? `${d.errors} item(s) could not be inspected.` : 'No indexing errors.'} Cached for 24 hours (built ${built}).`;
+    window.bazarrConfigured = !!d.bazarr_configured;
     $('bazarrSearch').disabled = !d.bazarr_configured || kind !== 'audio' || !d.languages.length || !$('browseLanguage').value;
     $('bazarrHint').textContent = !d.bazarr_configured
       ? 'Bazarr integration is not configured. Set BAZARR_URL and BAZARR_API_KEY in the container.'
-      : 'Searches only titles matching the selected Plex audio language. Bazarr uses each title’s existing language profile and may download matching subtitles.';
+      : 'Searches titles matching the selected Plex audio language. A saved mapping can assign a Bazarr subtitle profile before searching; this changes the Bazarr profile globally for that media item and may download subtitles.';
+    await loadBazarrProfileOptions(d.bazarr_configured);
     updateBrowseSortOptions();
     if (!d.languages.length) $('browseMeta').textContent += ' No language streams were found.';
   } catch (e) {
@@ -293,18 +419,26 @@ async function loadBrowseResults() {
       $('browseResults').innerHTML = '<li class="meta">No matching movies or series.</li>';
       return;
     }
+    let bazarrStatus = {};
+    if (window.bazarrConfigured) {
+      try {
+        const statusData = await api(`/api/bazarr/status?user=${encodeURIComponent($('user').value)}`);
+        bazarrStatus = statusData.status || {};
+      } catch (_) { /* Status is supplementary; keep the Plex browse results usable. */ }
+    }
     for (const it of d.results) {
       const li = document.createElement('li');
       li.className = 'result-row';
       const b = document.createElement('button');
       b.innerHTML = `${esc(it.title)} <span class="meta">${it.year ?? ''} · ${it.type === 'show' ? 'Series' : 'Movie'}</span>`;
       b.onclick = () => { showPage('search'); selectTitle(it); };
-      const coverage = document.createElement('span');
-      coverage.className = 'coverage';
-      coverage.textContent = it.type === 'show'
+      const detail = document.createElement('span'); detail.className = 'coverage';
+      detail.textContent = it.type === 'show'
         ? `${it.count}/${it.total} episodes · ${it.percentage}%`
         : 'Available';
-      li.append(b, coverage);
+      const status = bazarrStatus[it.key];
+      if (status) detail.textContent += ` · Bazarr: ${status.label}`;
+      li.append(b, detail);
       $('browseResults').appendChild(li);
     }
     $('browseMeta').textContent = `${d.results.length} matching title(s) found.`;
@@ -318,24 +452,118 @@ async function loadBrowseResults() {
 async function runBazarrSearch() {
   const language = $('browseLanguage').value;
   if (!language || $('browseKind').value !== 'audio') return;
-  const count = $('browseResults').querySelectorAll('li.result-row').length;
-  if (!count) return;
-  if (!confirm(`Ask Bazarr to search for missing subtitles for titles with ${language} audio? Bazarr may download subtitles according to each title's existing language profile.`)) return;
   $('bazarrSearch').disabled = true;
-  $('bazarrResult').className = 'msg';
-  $('bazarrResult').textContent = 'Sending search requests to Bazarr…';
+  $('bazarrPreview').classList.add('hidden');
+  $('bazarrResult').textContent = 'Preparing a read-only preview from Plex and Bazarr…';
   try {
-    const d = await api('/api/browse/bazarr-search', {
+    const d = await api('/api/browse/bazarr-preview', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user: $('user').value, kind: $('browseKind').value, language, type: $('browseType').value })
+      body: JSON.stringify({ user: $('user').value, language, type: $('browseType').value })
     });
-    $('bazarrResult').className = 'msg';
-    $('bazarrResult').innerHTML = `<span class="ok">Bazarr search triggered for ${d.queued} of ${d.matched} matching title(s).</span>` +
-      (d.unmatched.length ? `<details><summary>${d.unmatched.length} not found in Bazarr</summary><ul>${d.unmatched.map(x => `<li>${esc(x.title)}: ${esc(x.reason)}</li>`).join('')}</ul></details>` : '') +
-      (d.failures.length ? `<details><summary>${d.failures.length} request(s) failed</summary><ul>${d.failures.map(x => `<li>${esc(x.title)}: ${esc(x.error)}</li>`).join('')}</ul></details>` : '') +
-      `<p class="meta">${esc(d.note)}</p>`;
+    window.currentBazarrPreview = d;
+    $('bazarrPreviewSummary').textContent = `${d.selected_count} Plex title(s) matched the audio language; ${d.matched_count} matched uniquely in Bazarr; ${d.unmatched.length} could not be matched. ${d.profile_changes} global profile assignment(s) would change.`;
+    $('bazarrPreviewItems').innerHTML = '';
+    for (const item of d.candidates) {
+      const row = document.createElement('div'); row.className = 'bulk-item';
+      const check = document.createElement('input'); check.type = 'checkbox'; check.className = 'bazarr-select-item'; check.value = item.key; check.checked = true;
+      const text = document.createElement('div');
+      const currentProfile = item.current_profile_name || 'Unknown / unset';
+      const targetProfile = item.target_profile_name || 'Keep current';
+      const subStatus = item.subtitle_status?.missing?.length
+        ? `Missing (${item.subtitle_status.missing_items || 0} wanted item(s)): ${item.subtitle_status.missing.map(x => `${x} (${item.subtitle_status.missing_counts?.[x] || 0})`).join(', ')}`
+        : (item.subtitle_status?.label || 'Subtitle status unavailable');
+      text.innerHTML = `<strong>${esc(item.title)} (${esc(item.type)})</strong><small>Bazarr profile: ${esc(currentProfile)} → ${esc(targetProfile)}${item.profile_changed ? ' · WILL CHANGE' : ''}</small><small>${esc(subStatus)}</small>`;
+      row.append(check, text); $('bazarrPreviewItems').appendChild(row);
+    }
+    if (d.unmatched.length) {
+      const details = document.createElement('details');
+      const summary = document.createElement('summary'); summary.textContent = `${d.unmatched.length} title(s) not matched in Bazarr`;
+      const list = document.createElement('ul');
+      d.unmatched.forEach(x => { const li = document.createElement('li'); li.textContent = `${x.title}: ${x.reason}`; list.appendChild(li); });
+      details.append(summary, list); $('bazarrPreviewItems').appendChild(details);
+    }
+    $('bazarrPreview').classList.remove('hidden');
+    $('bazarrSelectAll').checked = true;
+    $('bazarrResult').textContent = 'Preview only: no Bazarr changes or searches have been made yet.';
+    $('bazarrStartSelected').disabled = !d.candidates.length;
   } catch (e) { showError($('bazarrResult'), e); }
   $('bazarrSearch').disabled = false;
+}
+
+async function startSelectedBazarrJob() {
+  const preview = window.currentBazarrPreview;
+  if (!preview) return;
+  const selected = [...document.querySelectorAll('.bazarr-select-item:checked')].map(x => x.value);
+  if (!selected.length) { $('bazarrJobText').textContent = 'Select at least one title.'; return; }
+  const hasProfileChanges = preview.candidates.some(x => selected.includes(x.key) && x.profile_changed);
+  const warning = hasProfileChanges
+    ? 'This will globally change one or more Bazarr profiles for all Plex users, then trigger subtitle searches. Bazarr may download subtitles.'
+    : 'This will trigger Bazarr subtitle searches. Bazarr may download subtitles.';
+  if (!confirm(`Start background processing for ${selected.length} selected title(s)?\n\n${warning}`)) return;
+  $('bazarrStartSelected').disabled = true;
+  try {
+    const started = await api('/api/browse/bazarr-jobs', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ preview_id: preview.preview_id, selected_keys: selected })
+    });
+    window.currentBazarrJobId = started.job_id;
+    $('bazarrJobText').textContent = `Job ${started.job_id} queued for ${started.total} title(s)…`;
+    $('bazarrJobDetails').innerHTML = ''; $('bazarrCancelJob').classList.remove('hidden'); $('bazarrRetryJob').classList.add('hidden');
+    await pollBazarrJob(started.job_id);
+  } catch (e) { showError($('bazarrJob'), e); $('bazarrStartSelected').disabled = false; }
+}
+
+async function pollBazarrJob(jobId) {
+  for (let attempt = 0; attempt < 360; attempt++) {
+    try {
+      const job = await api(`/api/bazarr/jobs/${encodeURIComponent(jobId)}`);
+      $('bazarrJobText').textContent = `Bazarr job ${job.status}: ${job.completed || 0}/${job.total || 0} completed; ${job.succeeded || 0} successful; ${job.failed || 0} failed.`;
+      if (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled') {
+        if (job.results?.length) {
+          const details = document.createElement('details'); const summary = document.createElement('summary');
+          summary.textContent = 'View per-title job results'; const list = document.createElement('ul');
+          job.results.forEach(r => { const li = document.createElement('li'); li.textContent = `${r.title}: ${r.status}${r.error ? ' — ' + r.error : ''}`; list.appendChild(li); });
+          details.append(summary, list); $('bazarrJobDetails').innerHTML = ''; $('bazarrJobDetails').appendChild(details);
+        }
+        $('bazarrStartSelected').disabled = false; $('bazarrCancelJob').classList.add('hidden');
+        if ((job.failed || 0) > 0 || job.status === 'cancelled') $('bazarrRetryJob').classList.remove('hidden');
+        return;
+      }
+    } catch (e) { $('bazarrJobText').textContent = `Could not read job status: ${e.message}`; break; }
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  }
+  $('bazarrStartSelected').disabled = false; $('bazarrCancelJob').classList.add('hidden');
+}
+
+async function cancelBazarrJob() {
+  if (!window.currentBazarrJobId) return;
+  try { await api(`/api/bazarr/jobs/${encodeURIComponent(window.currentBazarrJobId)}/cancel`, { method: 'POST' }); $('bazarrJobText').textContent += ' Cancellation requested…'; }
+  catch (e) { $('bazarrJobText').textContent = e.message; }
+}
+
+async function loadBazarrHistory() {
+  try {
+    const d = await api('/api/bazarr/jobs/history');
+    const details = document.createElement('details'); details.open = true;
+    const summary = document.createElement('summary'); summary.textContent = `Recent Bazarr job events (${d.events.length})`;
+    const list = document.createElement('ul');
+    d.events.slice().reverse().forEach(event => {
+      const li = document.createElement('li');
+      li.textContent = `${new Date(event.timestamp * 1000).toLocaleString()} · ${event.event} · ${event.title || event.job_id}${event.error ? ' · ' + event.error : ''}`;
+      list.appendChild(li);
+    });
+    details.append(summary, list); $('bazarrJobDetails').innerHTML = ''; $('bazarrJobDetails').appendChild(details);
+  } catch (e) { $('bazarrJobText').textContent = `Could not load job history: ${e.message}`; }
+}
+
+async function retryBazarrJob() {
+  if (!window.currentBazarrJobId) return;
+  try {
+    const d = await api(`/api/bazarr/jobs/${encodeURIComponent(window.currentBazarrJobId)}/retry`, { method: 'POST' });
+    window.currentBazarrJobId = d.job_id; $('bazarrJobText').textContent = `Retry job ${d.job_id} queued for ${d.total} failed title(s)…`;
+    $('bazarrJobDetails').innerHTML = ''; $('bazarrRetryJob').classList.add('hidden'); $('bazarrCancelJob').classList.remove('hidden');
+    await pollBazarrJob(d.job_id);
+  } catch (e) { $('bazarrJobText').textContent = e.message; }
 }
 
 loadUsers();

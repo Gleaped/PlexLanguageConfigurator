@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import os
+import re
+import json
 import threading
 import time
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 from importlib import resources
 
 import requests
@@ -13,6 +17,8 @@ from plexapi.exceptions import Unauthorized
 
 from . import core, plex_client
 from .bazarr_client import BazarrClient, BazarrError
+from .profile_mappings import ProfileMappingStore
+from .bazarr_profiles import suggest_profiles
 
 CACHE_SECONDS = 300
 BROWSE_CACHE_SECONDS = 86400
@@ -55,6 +61,27 @@ def _normal_title(value) -> str:
     return " ".join(str(value or "").casefold().split())
 
 
+def _record_bazarr_job_event(session, job_id: str, event: str, **details):
+    """Append a non-secret job audit event to the persistent data directory."""
+    record = {"timestamp": int(time.time()), "job_id": job_id, "event": event, **details}
+    try:
+        with session._job_log_lock:
+            os.makedirs(os.path.dirname(session._job_log_path), exist_ok=True)
+            if os.path.exists(session._job_log_path) and os.path.getsize(session._job_log_path) > 2_000_000:
+                rotated = session._job_log_path + ".1"
+                try:
+                    if os.path.exists(rotated):
+                        os.remove(rotated)
+                    os.replace(session._job_log_path, rotated)
+                except OSError:
+                    pass
+            with open(session._job_log_path, "a", encoding="utf-8") as stream:
+                stream.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except OSError:
+        # Audit logging must never prevent a subtitle operation from completing.
+        pass
+
+
 def _options(options):
     return [{"code": o.code, "name": o.name, "count": o.count, "total": o.total,
              "label": o.label()} for o in options]
@@ -64,15 +91,25 @@ class PlexSession:
     """Holds the admin connection and caches per-user connections and loaded titles."""
 
     def __init__(self, url: str, token: str, connect=plex_client.connect,
-                 bazarr: BazarrClient | None = None):
+                 bazarr: BazarrClient | None = None,
+                 profile_mappings: ProfileMappingStore | None = None):
         self.url, self.token, self._connect = url, token, connect
         self.bazarr = bazarr
+        self.profile_mappings = profile_mappings or ProfileMappingStore()
         self._admin = None
         self._users: dict[str, object] = {}
         self._items: dict[tuple[str, str], tuple[float, object, list]] = {}
         self._browse: dict[str, tuple[float, dict]] = {}
         self._lock = threading.Lock()
         self._browse_lock = threading.Lock()
+        self._bazarr_lock = threading.Lock()
+        self._bazarr_status_cache = (0.0, None)
+        self._bazarr_previews: dict[str, dict] = {}
+        self._bazarr_jobs: dict[str, dict] = {}
+        self._bazarr_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="bazarr-search")
+        self._job_log_lock = threading.Lock()
+        self._job_log_path = os.path.join(os.environ.get("PLEXLANG_DATA_DIR", "/data"),
+                                          "bazarr-job-history.jsonl")
 
     def admin(self):
         if self._admin is None:
@@ -277,82 +314,373 @@ def create_app(session: PlexSession | None = None) -> Flask:
                        built_at=index["built_at"], expires_at=index["expires_at"],
                        cache_seconds=index["cache_seconds"])
 
-    @app.post("/api/browse/bazarr-search")
-    def bazarr_search():
+    @app.get("/api/bazarr/profiles")
+    def bazarr_profiles():
         if session.bazarr is None:
-            return jsonify(error="Bazarr is not configured. Set BAZARR_URL and BAZARR_API_KEY."), 503
-        body = request.get_json(force=True)
+            return jsonify(error="Bazarr is not configured."), 503
+        try:
+            profiles = session.bazarr.language_profiles()
+            mappings = session.profile_mappings.load()
+        except (BazarrError, ValueError) as exc:
+            return jsonify(error=str(exc)), 502
+        return jsonify(
+            profiles=[{"id": str(p.get("profileId")), "name": p.get("name", "Unnamed profile")}
+                      for p in profiles if p.get("profileId") is not None],
+            mappings=mappings,
+            storage_path=str(session.profile_mappings.path),
+        )
+
+    @app.put("/api/bazarr/profile-mappings")
+    def save_bazarr_profile_mappings():
+        if session.bazarr is None:
+            return jsonify(error="Bazarr is not configured."), 503
+        body = request.get_json(force=True) or {}
+        mappings = body.get("mappings")
+        if not isinstance(mappings, dict):
+            return jsonify(error="mappings must be an object of language-code to profile-ID pairs."), 400
+        try:
+            profiles = session.bazarr.language_profiles()
+            valid_ids = {str(p.get("profileId")) for p in profiles if p.get("profileId") is not None}
+            for language, profile_id in mappings.items():
+                if not isinstance(language, str) or not re.fullmatch(r"[A-Za-z]{2,3}", language):
+                    return jsonify(error=f"Invalid audio language code: {language!r}."), 400
+                if str(profile_id) not in valid_ids:
+                    return jsonify(error=f"Unknown Bazarr profile ID {profile_id!r} for {language}.",
+                                   profiles=[{"id": str(p.get("profileId")), "name": p.get("name")}
+                                             for p in profiles]), 400
+            session.profile_mappings.save(mappings)
+        except (BazarrError, ValueError) as exc:
+            return jsonify(error=str(exc)), 502
+        return jsonify(saved=True, mappings=session.profile_mappings.load(),
+                       storage_path=str(session.profile_mappings.path))
+
+    def _bazarr_context(force=False):
+        """Fetch/cache Bazarr catalog, wanted subtitles and profile metadata."""
+        if session.bazarr is None:
+            raise BazarrError("Bazarr is not configured.")
+        cached_at, cached = session._bazarr_status_cache
+        if cached is not None and not force and time.time() - cached_at < 300:
+            return cached
+        with session._bazarr_lock:
+            cached_at, cached = session._bazarr_status_cache
+            if cached is not None and not force and time.time() - cached_at < 300:
+                return cached
+            series, movies = session.bazarr.catalog()
+            wanted_movies = session.bazarr.wanted_movies()
+            wanted_episodes = session.bazarr.wanted_episodes()
+            profiles = session.bazarr.language_profiles()
+            languages = session.bazarr.languages()
+            profile_names = {str(row.get("profileId")): row.get("name", "Unnamed profile")
+                             for row in profiles if row.get("profileId") is not None}
+            language_names = {}
+            language_aliases = {}
+            for row in languages:
+                code2 = str(row.get("code2") or row.get("code") or "").lower()
+                code3 = str(row.get("code3") or "").lower()
+                name = str(row.get("name") or row.get("language") or "").strip()
+                aliases = {x for x in (code2, code3, name.casefold()) if x}
+                if code2 and name:
+                    language_names[code2] = name
+                if code3 and name:
+                    language_names[code3] = name
+                for alias in aliases:
+                    language_aliases[alias] = aliases
+            data = {"series": series, "movies": movies,
+                    "wanted_movies": wanted_movies, "wanted_episodes": wanted_episodes,
+                    "profiles": profiles, "profile_names": profile_names,
+                    "language_names": language_names, "language_aliases": language_aliases}
+            session._bazarr_status_cache = (time.time(), data)
+            return data
+
+    def _match_bazarr_title(title, context):
+        media = title["type"]
+        rows = context["series"] if media == "show" else context["movies"]
+        id_pairs = (("imdbId", "imdb"), ("tvdbId", "tvdb")) if media == "show" else (("imdbId", "imdb"), ("tmdbId", "tmdb"))
+        id_field = "sonarrSeriesId" if media == "show" else "radarrId"
+        ids = title.get("ids") or {}
+        wanted_ids = {str(value).strip().lower() for _, key in id_pairs
+                      for value in ids.get(key, []) if value}
+        for row in rows:
+            row_ids = {str(row.get(field)).strip().lower() for field, _ in id_pairs if row.get(field)}
+            if wanted_ids.intersection(row_ids) and row.get(id_field):
+                return row
+        exact = [row for row in rows
+                 if _normal_title(row.get("title")) == _normal_title(title.get("title"))
+                 and str(row.get("year") or "") == str(title.get("year") or "")
+                 and row.get(id_field)]
+        return exact[0] if len(exact) == 1 else None
+
+    def _wanted_status(title, context, bazarr_row):
+        """Conservative status: missing is explicit; absence is reported as unknown."""
+        if not bazarr_row:
+            return {"state": "unmatched", "label": "Not in Bazarr", "missing": []}
+        if title["type"] == "movie":
+            bazarr_id = str(bazarr_row.get("radarrId") or "")
+            rows = context["wanted_movies"]
+            id_keys = ("radarrId", "radarrid", "movieId", "movie_id")
+        else:
+            bazarr_id = str(bazarr_row.get("sonarrSeriesId") or "")
+            rows = context["wanted_episodes"]
+            id_keys = ("sonarrSeriesId", "seriesId", "seriesid", "sonarr_series_id")
+        missing_counts = {}
+        for row in rows:
+            row_ids = {str(row.get(key)) for key in id_keys if row.get(key) not in (None, "")}
+            if bazarr_id and bazarr_id in row_ids:
+                lang = str(row.get("language") or row.get("languageName") or row.get("code2") or "Unknown language")
+                missing_counts[lang] = missing_counts.get(lang, 0) + 1
+        if missing_counts:
+            missing = sorted(missing_counts)
+            return {"state": "missing", "label": "Missing wanted subtitles", "missing": missing,
+                    "missing_counts": missing_counts, "missing_items": sum(missing_counts.values())}
+        return {"state": "not-listed", "label": "No wanted entries (not verified)", "missing": [],
+                "missing_counts": {}, "missing_items": 0,
+                "note": "Bazarr wanted-list has no missing entries; this is not a full on-disk verification."}
+
+    def _build_bazarr_preview(user, language, media_type):
+        index = session.browse_index(user)
+        selected = [title for title in index["titles"]
+                    if (media_type == "all" or title["type"] == media_type)
+                    and any(o["code"].lower() == language for o in title["audio"])]
+        context = _bazarr_context()
+        mappings = session.profile_mappings.load()
+        mapped_profile = mappings.get(language)
+        profile_names = context["profile_names"]
+        if mapped_profile and mapped_profile not in profile_names:
+            raise ValueError(f"The saved Bazarr profile mapping for {language} no longer exists.")
+        profile_name = profile_names.get(mapped_profile) if mapped_profile else None
+        candidates, unmatched = [], []
+        for title in selected:
+            row = _match_bazarr_title(title, context)
+            if not row:
+                unmatched.append({"key": title["key"], "title": title["title"], "type": title["type"],
+                                  "reason": "No unique Bazarr match by external ID or exact title/year."})
+                continue
+            bazarr_id = row.get("sonarrSeriesId" if title["type"] == "show" else "radarrId")
+            current_profile = str(row.get("profileId") or "")
+            changed = bool(mapped_profile and current_profile != mapped_profile)
+            status = _wanted_status(title, context, row)
+            candidates.append({
+                "key": title["key"], "title": title["title"], "year": title["year"],
+                "type": title["type"], "bazarr_id": int(bazarr_id),
+                "current_profile_id": current_profile,
+                "current_profile_name": profile_names.get(current_profile, "Unknown / unset"),
+                "target_profile_id": mapped_profile,
+                "target_profile_name": profile_name,
+                "profile_changed": changed,
+                "subtitle_status": status,
+            })
+        return {"candidates": candidates, "unmatched": unmatched,
+                "selected_count": len(selected), "mapped_profile_id": mapped_profile,
+                "mapped_profile_name": profile_name}
+
+    @app.get("/api/bazarr/profile-suggestions")
+    def bazarr_profile_suggestions():
+        if session.bazarr is None:
+            return jsonify(error="Bazarr is not configured."), 503
+        language = request.args.get("language", "").strip().lower()
+        if not language:
+            return jsonify(error="language is required"), 400
+        try:
+            profiles = session.bazarr.language_profiles()
+            languages = session.bazarr.languages()
+        except BazarrError as exc:
+            return jsonify(error=str(exc)), 502
+        language_name = language
+        aliases = {language}
+        for row in languages:
+            row_aliases = {str(row.get(key) or "").strip().casefold()
+                           for key in ("code2", "code3", "code") if row.get(key)}
+            name = str(row.get("name") or row.get("language") or "").strip()
+            if language in row_aliases:
+                language_name = name or language
+                aliases.update(row_aliases)
+                if name:
+                    aliases.add(name.casefold())
+                break
+        suggestions = suggest_profiles(profiles, language, language_name, aliases)
+        return jsonify(language=language, language_name=language_name,
+                       suggestions=suggestions,
+                       note="Suggestions inspect Bazarr profile language definitions. Review forced, hearing-impaired, exclude-audio and cutoff rules in Bazarr before assigning a profile.")
+
+    @app.post("/api/browse/bazarr-preview")
+    def bazarr_preview():
+        if session.bazarr is None:
+            return jsonify(error="Bazarr is not configured."), 503
+        body = request.get_json(force=True) or {}
         user = str(body.get("user") or "").strip()
         language = str(body.get("language") or "").strip().lower()
-        kind = body.get("kind", "audio")
         media_type = body.get("type", "all")
-        if kind != "audio":
-            return jsonify(error="Bazarr bulk search must be scoped by an audio language."), 400
         if not user or not language:
             return jsonify(error="user and audio language are required."), 400
         if media_type not in ("all", "movie", "show"):
             return jsonify(error="type must be all, movie or show."), 400
-
-        index = session.browse_index(user)
-        selected = []
-        for title in index["titles"]:
-            if media_type != "all" and title["type"] != media_type:
-                continue
-            if any(o["code"].lower() == language for o in title["audio"]):
-                selected.append(title)
-        if not selected:
-            return jsonify(queued=0, matched=0, unmatched=[], failures=[],
-                           message="No titles in the cached Plex index have this audio language.")
-
         try:
-            bazarr_series, bazarr_movies = session.bazarr.catalog()
+            plan = _build_bazarr_preview(user, language, media_type)
+        except (BazarrError, ValueError) as exc:
+            return jsonify(error=str(exc)), 502
+        preview_id = uuid.uuid4().hex
+        session._bazarr_previews[preview_id] = {**plan, "language": language, "user": user,
+                                                 "created_at": time.time()}
+        # Bound memory use: retain only the newest 20 previews.
+        if len(session._bazarr_previews) > 20:
+            oldest = sorted(session._bazarr_previews.items(), key=lambda item: item[1]["created_at"])
+            for key, _ in oldest[:-20]:
+                session._bazarr_previews.pop(key, None)
+        return jsonify(preview_id=preview_id, language=language,
+                       selected_count=plan["selected_count"],
+                       matched_count=len(plan["candidates"]),
+                       unmatched=plan["unmatched"], candidates=plan["candidates"],
+                       profile_changes=sum(1 for c in plan["candidates"] if c["profile_changed"]),
+                       global_profile_warning=bool(plan["mapped_profile_id"]))
+
+    def _run_bazarr_job(job_id, candidates, language):
+        job = session._bazarr_jobs[job_id]
+        job.update(status="running", started_at=int(time.time()))
+        _record_bazarr_job_event(session, job_id, "started", total=len(candidates), language=language)
+        results = []
+        for candidate in candidates:
+            if job.get("cancel_requested"):
+                completed_keys = {row.get("key") for row in results}
+                for pending in candidates:
+                    if pending["key"] not in completed_keys:
+                        results.append({"key": pending["key"], "title": pending["title"],
+                                        "type": pending["type"], "status": "cancelled",
+                                        "error": "Not started because the job was cancelled."})
+                job.update(status="cancelled", finished_at=int(time.time()), results=results,
+                           completed=len(results), cancelled=sum(1 for r in results if r["status"] == "cancelled"),
+                           failed=sum(1 for r in results if r["status"] == "failed"))
+                _record_bazarr_job_event(session, job_id, "cancelled", completed=len(results), total=len(candidates))
+                return
+            title_label = candidate["title"]
+            last_error = None
+            for attempt in range(1, 3):
+                try:
+                    if candidate["profile_changed"]:
+                        session.bazarr.assign_profile(candidate["type"], candidate["bazarr_id"],
+                                                      int(candidate["target_profile_id"]))
+                    session.bazarr.search_missing(candidate["type"], candidate["bazarr_id"])
+                    results.append({"key": candidate["key"], "title": title_label,
+                                    "type": candidate["type"], "status": "success",
+                                    "profile_changed": candidate["profile_changed"],
+                                    "attempts": attempt})
+                    last_error = None
+                    break
+                except Exception as exc:
+                    last_error = f"{exc.__class__.__name__}: {exc}"
+                    if attempt < 2:
+                        time.sleep(1)
+            if last_error:
+                results.append({"key": candidate["key"], "title": title_label,
+                                "type": candidate["type"], "status": "failed",
+                                "error": last_error, "attempts": 2})
+            job.update(completed=len(results), total=len(candidates), results=list(results))
+            _record_bazarr_job_event(session, job_id, results[-1]["status"],
+                                     title=title_label, media_type=candidate["type"],
+                                     attempts=results[-1].get("attempts"), error=results[-1].get("error"))
+        job.update(status="completed", finished_at=int(time.time()), results=results,
+                   succeeded=sum(1 for r in results if r["status"] == "success"),
+                   failed=sum(1 for r in results if r["status"] == "failed"))
+        _record_bazarr_job_event(session, job_id, "completed", succeeded=job["succeeded"], failed=job["failed"])
+
+    @app.post("/api/browse/bazarr-jobs")
+    def start_bazarr_job():
+        if session.bazarr is None:
+            return jsonify(error="Bazarr is not configured."), 503
+        body = request.get_json(force=True) or {}
+        preview_id = str(body.get("preview_id") or "")
+        selected_keys = body.get("selected_keys")
+        preview = session._bazarr_previews.get(preview_id)
+        if not preview:
+            return jsonify(error="Preview not found or expired. Generate a new preview."), 404
+        if not isinstance(selected_keys, list) or not selected_keys:
+            return jsonify(error="Select at least one title to process."), 400
+        allowed = {c["key"] for c in preview["candidates"]}
+        if any(str(key) not in allowed for key in selected_keys):
+            return jsonify(error="Selection contains titles outside this preview."), 400
+        chosen = [c for c in preview["candidates"] if c["key"] in {str(k) for k in selected_keys}]
+        job_id = uuid.uuid4().hex
+        session._bazarr_jobs[job_id] = {"job_id": job_id, "status": "queued", "completed": 0,
+                                        "total": len(chosen), "results": [], "created_at": int(time.time()),
+                                        "candidates": chosen, "cancel_requested": False,
+                                        "language": preview["language"]}
+        session._bazarr_executor.submit(_run_bazarr_job, job_id, chosen, preview["language"])
+        return jsonify(job_id=job_id, status="queued", total=len(chosen)), 202
+
+    @app.get("/api/bazarr/jobs/<job_id>")
+    def bazarr_job_status(job_id):
+        job = session._bazarr_jobs.get(job_id)
+        if not job:
+            return jsonify(error="Job not found."), 404
+        public_job = {key: value for key, value in job.items() if key != "candidates"}
+        return jsonify(public_job)
+
+    @app.post("/api/bazarr/jobs/<job_id>/cancel")
+    def cancel_bazarr_job(job_id):
+        job = session._bazarr_jobs.get(job_id)
+        if not job:
+            return jsonify(error="Job not found."), 404
+        if job.get("status") in ("completed", "failed", "cancelled"):
+            return jsonify(error=f"Job is already {job.get('status')}"), 409
+        job["cancel_requested"] = True
+        return jsonify(job_id=job_id, cancel_requested=True)
+
+    @app.post("/api/bazarr/jobs/<job_id>/retry")
+    def retry_bazarr_job(job_id):
+        previous = session._bazarr_jobs.get(job_id)
+        if not previous:
+            return jsonify(error="Job not found."), 404
+        if previous.get("status") not in ("completed", "cancelled"):
+            return jsonify(error="Only completed or cancelled jobs can be retried."), 409
+        failed_keys = {row.get("key") for row in previous.get("results", [])
+                       if row.get("status") in ("failed", "cancelled")}
+        candidates = [row for row in previous.get("candidates", []) if row.get("key") in failed_keys]
+        if not candidates:
+            return jsonify(error="There are no failed titles to retry."), 400
+        new_id = uuid.uuid4().hex
+        session._bazarr_jobs[new_id] = {"job_id": new_id, "status": "queued", "completed": 0,
+                                        "total": len(candidates), "results": [], "created_at": int(time.time()),
+                                        "candidates": candidates, "cancel_requested": False,
+                                        "retry_of": job_id, "language": previous.get("language", "")}
+        session._bazarr_executor.submit(_run_bazarr_job, new_id, candidates, previous.get("language", ""))
+        return jsonify(job_id=new_id, status="queued", total=len(candidates)), 202
+
+    @app.get("/api/bazarr/jobs/history")
+    def bazarr_job_history():
+        try:
+            if not os.path.exists(session._job_log_path):
+                return jsonify(events=[], storage_path=session._job_log_path)
+            with session._job_log_lock:
+                with open(session._job_log_path, "r", encoding="utf-8") as stream:
+                    lines = stream.readlines()[-200:]
+            events = []
+            for line in lines:
+                try:
+                    events.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+            return jsonify(events=events, storage_path=session._job_log_path)
+        except OSError as exc:
+            return jsonify(error=f"Could not read job history: {exc}"), 500
+
+    @app.get("/api/bazarr/status")
+    def bazarr_status():
+        if session.bazarr is None:
+            return jsonify(error="Bazarr is not configured."), 503
+        try:
+            context = _bazarr_context()
+            index = session.browse_index(request.args["user"])
+            output = {}
+            for title in index["titles"]:
+                row = _match_bazarr_title(title, context)
+                output[title["key"]] = _wanted_status(title, context, row)
+            return jsonify(status=output, cached_seconds=300)
         except BazarrError as exc:
             return jsonify(error=str(exc)), 502
 
-        def id_set(row, *keys):
-            return {str(row.get(k)).strip().lower() for k in keys
-                    if row.get(k) not in (None, "", 0)}
-
-        by_external = {"show": {}, "movie": {}}
-        by_title = {"show": {}, "movie": {}}
-        for media, rows, id_fields, id_field in (
-            ("show", bazarr_series, ("imdbId", "tvdbId"), "sonarrSeriesId"),
-            ("movie", bazarr_movies, ("imdbId",), "radarrId"),
-        ):
-            for row in rows:
-                for identifier in id_set(row, *id_fields):
-                    by_external[media].setdefault(identifier, row.get(id_field))
-                title_key = (_normal_title(row.get("title")), str(row.get("year") or ""))
-                if title_key[0]:
-                    by_title[media].setdefault(title_key, []).append(row.get(id_field))
-
-        queued, unmatched, failures = [], [], []
-        for title in selected:
-            media = title["type"]
-            ids = title.get("ids") or {}
-            candidates = [str(x).lower() for key in (("imdb", "tvdb") if media == "show" else ("imdb",))
-                          for x in ids.get(key, [])]
-            bazarr_id = next((by_external[media][x] for x in candidates
-                              if x in by_external[media] and by_external[media][x]), None)
-            if not bazarr_id:
-                title_key = (_normal_title(title.get("title")), str(title.get("year") or ""))
-                exact_matches = [x for x in by_title[media].get(title_key, []) if x]
-                if len(exact_matches) == 1:
-                    bazarr_id = exact_matches[0]
-            if not bazarr_id:
-                unmatched.append({"title": title["title"], "type": media,
-                                  "reason": "No unique Bazarr match by external ID or exact title/year."})
-                continue
-            try:
-                session.bazarr.search_missing(media, int(bazarr_id))
-                queued.append({"title": title["title"], "type": media})
-            except (BazarrError, ValueError) as exc:
-                failures.append({"title": title["title"], "error": str(exc)})
-
-        return jsonify(queued=len(queued), matched=len(selected), results=queued,
-                       unmatched=unmatched, failures=failures,
-                       audio_language=language,
-                       note="Bazarr searches using the language profile already assigned to each title.")
+    @app.post("/api/browse/bazarr-search")
+    def bazarr_search_legacy():
+        return jsonify(error="This endpoint has been replaced by preview + selective background jobs.",
+                       replacement="POST /api/browse/bazarr-preview then POST /api/browse/bazarr-jobs"), 410
 
     @app.get("/api/languages")
     def languages():
