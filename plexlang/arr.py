@@ -94,6 +94,15 @@ class _ArrClient(_Http):
     def command(self, body: dict):
         return self.request("POST", "command", json=body)
 
+    def create_custom_format(self, body: dict) -> dict:
+        return self.request("POST", "customformat", json=body) or {}
+
+    def delete_custom_format(self, format_id: int):
+        return self.request("DELETE", f"customformat/{int(format_id)}")
+
+    def update_quality_profile(self, profile_id: int, body: dict):
+        return self.request("PUT", f"qualityprofile/{int(profile_id)}", json=body)
+
 
 class SonarrClient(_ArrClient):
     def series(self) -> list[dict]:
