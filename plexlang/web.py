@@ -23,7 +23,9 @@ from .profile_mappings import ProfileMappingStore
 from .bazarr_profiles import suggest_profiles
 from .index import LibraryIndex, coverage, language_aliases, visible_keys
 from .labels import LabelSync, _env_bool
+from .arr import ArrError
 from .acquire import Acquirer, clients_from_env
+from .optimize import Optimizer
 
 CACHE_SECONDS = 300
 VISIBILITY_SECONDS = 1800  # how long a Home user's visible-title list is reused
@@ -109,6 +111,7 @@ class PlexSession:
         self.labels = LabelSync(self.admin, self.index, language=self.focus_language)
         sonarr, radarr, seerr = arr_clients if arr_clients is not None else clients_from_env()
         self.acquirer = Acquirer(self.index, sonarr, radarr, seerr, language=self.focus_language)
+        self.optimizer = Optimizer(sonarr, radarr)
         self._visible: dict[str, tuple[float, set | None]] = {}
         self._visible_refreshing: set[str] = set()
         self.bazarr = bazarr
@@ -704,6 +707,56 @@ def create_app(session: PlexSession | None = None) -> Flask:
             return jsonify(error="Set SONARR_URL/SONARR_API_KEY, RADARR_URL/RADARR_API_KEY "
                                  "or SEERR_URL/SEERR_API_KEY."), 503
         return jsonify(session.acquirer.config_report(force=request.args.get("refresh") == "1"))
+
+    @app.post("/api/arr/optimize/preview")
+    def optimize_preview():
+        """Read-only: every change that would be made to Sonarr/Radarr profiles."""
+        body = request.get_json(force=True) or {}
+        service = body.get("service")
+        if service not in ("sonarr", "radarr"):
+            return jsonify(error="service must be sonarr or radarr."), 400
+        try:
+            return jsonify(session.optimizer.preview(service, body.get("scores")))
+        except LookupError as exc:
+            return jsonify(error=str(exc)), 503
+        except ArrError as exc:
+            return jsonify(error=str(exc)), 502
+
+    @app.post("/api/arr/optimize/apply")
+    def optimize_apply():
+        body = request.get_json(force=True) or {}
+        try:
+            result = session.optimizer.apply(str(body.get("preview_id") or ""),
+                                             body.get("profile_ids") or [],
+                                             body.get("confirm") is True)
+            session.acquirer._cache = (0.0, None)  # profiles changed: re-read on next use
+            return jsonify(result)
+        except LookupError as exc:
+            return jsonify(error=str(exc)), 404
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+        except ArrError as exc:
+            return jsonify(error=f"{exc} A backup of the original profiles was saved first; "
+                                 "use Restore to undo anything already applied."), 502
+
+    @app.get("/api/arr/optimize/backups")
+    def optimize_backups():
+        return jsonify(backups=session.optimizer.backups())
+
+    @app.post("/api/arr/optimize/restore")
+    def optimize_restore():
+        body = request.get_json(force=True) or {}
+        try:
+            result = session.optimizer.restore(str(body.get("backup_id") or ""),
+                                               body.get("confirm") is True)
+            session.acquirer._cache = (0.0, None)
+            return jsonify(result)
+        except LookupError as exc:
+            return jsonify(error=str(exc)), 404
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+        except ArrError as exc:
+            return jsonify(error=str(exc)), 502
 
     @app.post("/api/arr/preview")
     def arr_preview():

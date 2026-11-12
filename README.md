@@ -85,6 +85,17 @@ Nothing is sent until you press **Start requests**. The app never edits your pro
 4. Keep **Upgrades allowed** on, and set **Upgrade until custom format score** at least as high as the MULTi score. In Radarr, set the profile language to *Any*, not *Original* or English.
 5. Set `SONARR_ITALIAN_PROFILE` / `RADARR_ITALIAN_PROFILE` to that profile's name, or leave them empty and the best Italian-ready profile is picked.
 
+### Optimise Sonarr / Radarr profiles (Italian + English + Japanese)
+
+The **Sonarr / Radarr** tab can tune your quality profiles so releases with more of your languages win. It is built to be safe on a live setup:
+
+1. **Setup check** (read-only) shows, per profile, whether a search would prefer an Italian release and why not.
+2. Set the scores (defaults: Italian 200, English 100, Japanese 100, MULTi / Dual audio bonus 50) and press **Preview**. The app lists every change: custom formats it would create, score changes per profile, and fixes to the upgrade cut-off, "upgrades allowed" and profile language (`Original` blocks non-original audio).
+3. Tick the profiles to change, tick the confirmation box, and press **Back up and apply**. The original profiles are saved to `/data/backups/` first.
+4. **Restore** on the Backups card puts the original profiles back and deletes only the custom formats the app created.
+
+Scores add up, so a release with Italian + English + Japanese scores 450 and beats one with a single language. Your own existing custom formats are reused and a score you set higher is never lowered. Created formats are prefixed `PLC ` so you can recognise them. Nothing is applied without the confirmation, and running it twice changes nothing the second time.
+
 ### Italian label in Plex
 
 The same tab shows how many titles have Italian and how many already carry the `Italian` label. **Update labels in Plex** adds the label to the ones that are missing it. Set `AUTO_LABEL=true` to have this happen after every refresh instead.

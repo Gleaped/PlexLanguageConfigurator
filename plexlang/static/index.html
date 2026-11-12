@@ -5,221 +5,301 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Plex Language Configurator</title>
 <style>
-  :root { --bg:#f6f6f4; --card:#fff; --text:#1d1d1b; --muted:#6b6b66; --line:#e2e1dc;
-          --accent:#c98a00; --accent-text:#fff; --warn:#a15c00; --ok:#2f7d32; --err:#b3261e; }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg:#151514; --card:#1f1f1d; --text:#ecebe6; --muted:#a3a29b; --line:#34332f;
-            --accent:#e5a00d; --accent-text:#1d1d1b; --warn:#f0b35a; --ok:#7cc47f; --err:#f2827a; }
+  :root {
+    --bg:#f3f4f6; --surface:#fff; --surface-2:#f8f9fa; --text:#16181d; --muted:#667085; --line:#e4e7ec;
+    --accent:#e5a00d; --accent-strong:#c98a00; --accent-text:#1a1400; --accent-soft:#fff6e0;
+    --ok:#12805c; --ok-soft:#e3f6ee; --warn:#a15c00; --warn-soft:#fff2dc; --err:#b42318; --err-soft:#fdeceb;
+    --info:#175cd3; --info-soft:#e8f0fe; --shadow:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.08);
+    --radius:12px;
   }
-  * { box-sizing: border-box; }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#0e0f12; --surface:#17181c; --surface-2:#1e2025; --text:#eceef2; --muted:#9aa1ae; --line:#2b2e35;
+      --accent:#f0b429; --accent-strong:#f5c04a; --accent-text:#1a1400; --accent-soft:#2b2410;
+      --ok:#5ed3a5; --ok-soft:#10261d; --warn:#f3b556; --warn-soft:#2c2210; --err:#f48a82; --err-soft:#2d1614;
+      --info:#8ab4ff; --info-soft:#14213a; --shadow:none;
+    }
+  }
+  * { box-sizing:border-box; }
+  html { scroll-behavior:smooth; }
   body { margin:0; background:var(--bg); color:var(--text);
-         font:15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 64px; }
-  h1 { font-size: 22px; margin: 0 0 4px; }
-  p.sub { color: var(--muted); margin: 0 0 24px; }
-  section { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
-            padding: 16px; margin-bottom: 16px; }
-  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 12px; }
-  label { display:block; font-weight:600; margin: 12px 0 4px; }
-  select, input, button { font: inherit; color: inherit; }
-  select, input { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px;
-                  background: var(--bg); }
-  button { padding: 8px 16px; border-radius: 6px; border: 1px solid var(--line);
-           background: var(--bg); cursor: pointer; }
-  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
-  button:disabled { opacity: .5; cursor: default; }
-  .row { display:flex; gap: 8px; }
-  .row input { flex: 1; }
-  ul.results { list-style:none; padding:0; margin: 12px 0 0; }
-  ul.results li button { width:100%; text-align:left; border:none; border-bottom: 1px solid var(--line);
-                         border-radius:0; background:none; padding: 10px 4px; }
-  ul.results li button:hover { background: var(--bg); }
-  .meta { color: var(--muted); font-size: 13px; }
-  .actions { display:flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
-  .msg { margin-top: 12px; }
-  .msg.err { color: var(--err); }
-  .ok { color: var(--ok); font-weight: 600; }
-  .warn { color: var(--warn); font-weight: 600; }
-  details { margin-top: 6px; }
-  details ul { margin: 6px 0 0; padding-left: 20px; color: var(--muted); font-size: 13px; }
-  .hidden { display: none; }
-  .tabs { display:flex; gap:8px; margin: 0 0 16px; }
-  .tabs button[aria-selected="true"] { background:var(--accent); color:var(--accent-text); border-color:var(--accent); font-weight:600; }
-  .browse-controls { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:10px; }
-  .browse-controls label { margin-top:4px; }
-  .browse-meta { color:var(--muted); font-size:13px; margin-top:10px; }
-  .result-row { display:flex; justify-content:space-between; align-items:center; gap:12px; }
-  .result-row button { flex:1; }
-  .coverage { color:var(--muted); font-size:12px; white-space:nowrap; }
-  .profile-map { border:1px solid var(--line); border-radius:8px; padding:12px; margin-top:12px; }
-  .bulk-preview { border:1px solid var(--line); border-radius:8px; padding:12px; margin-top:12px; }
-  .bulk-item { display:grid; grid-template-columns:auto minmax(0,1fr); gap:8px; padding:9px 0; border-bottom:1px solid var(--line); }
-  .bulk-item:last-child { border-bottom:0; }
-  .bulk-item small { display:block; color:var(--muted); }
-  .status-pill { display:inline-block; border:1px solid var(--line); border-radius:20px; padding:2px 8px; font-size:11px; margin-left:6px; }
-  .suggestion { display:flex; justify-content:space-between; gap:10px; align-items:center; padding:6px 0; }
-  .index-status { font-size:13px; color:var(--muted); margin:-12px 0 16px; }
-  .index-status .bar { height:4px; background:var(--line); border-radius:2px; margin-top:4px; overflow:hidden; }
-  .index-status .bar span { display:block; height:100%; background:var(--accent); }
-  .tabs { flex-wrap:wrap; }
-  @media (max-width:520px) { .browse-controls { grid-template-columns:1fr; } }
+         font:14px/1.5 Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; -webkit-font-smoothing:antialiased; }
+  button, input, select { font:inherit; color:inherit; }
+  h1 { font-size:18px; margin:0; letter-spacing:-.01em; }
+  h2 { font-size:16px; margin:0 0 2px; letter-spacing:-.01em; }
+  h3 { font-size:13px; margin:0 0 6px; }
+  p { margin:0 0 8px; }
+  a { color:var(--info); }
+  small { color:var(--muted); }
+  .hidden { display:none !important; }
+  .muted { color:var(--muted); }
+  .ok { color:var(--ok); } .warn { color:var(--warn); } .err { color:var(--err); }
+
+  /* layout */
+  header.top { position:sticky; top:0; z-index:10; background:var(--surface); border-bottom:1px solid var(--line); }
+  .top-inner { max-width:1100px; margin:0 auto; padding:10px 20px; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+  .brand { display:flex; align-items:center; gap:10px; margin-right:auto; }
+  .logo { width:30px; height:30px; border-radius:8px; background:var(--accent); color:var(--accent-text);
+          display:grid; place-items:center; font-weight:800; font-size:15px; }
+  .userbox { display:flex; align-items:center; gap:8px; }
+  .userbox label { color:var(--muted); font-size:12px; margin:0; }
+  .userbox select { width:auto; min-width:150px; }
+  nav.tabs { max-width:1100px; margin:0 auto; padding:0 20px; display:flex; gap:4px; overflow-x:auto; }
+  nav.tabs button { background:none; border:0; border-bottom:2px solid transparent; border-radius:0; padding:10px 14px;
+                    color:var(--muted); font-weight:600; cursor:pointer; white-space:nowrap; }
+  nav.tabs button:hover { color:var(--text); }
+  nav.tabs button[aria-selected="true"] { color:var(--text); border-bottom-color:var(--accent); }
+  main { max-width:1100px; margin:0 auto; padding:20px 20px 80px; }
+  .status { max-width:1100px; margin:0 auto; padding:0 20px; }
+  .status-inner { margin-top:12px; font-size:12.5px; color:var(--muted); display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--ok); flex:none; }
+  .dot.busy { background:var(--accent); animation:pulse 1.2s infinite; }
+  .dot.bad { background:var(--err); }
+  @keyframes pulse { 50% { opacity:.35; } }
+  .progress { flex:1; min-width:120px; max-width:260px; height:4px; border-radius:2px; background:var(--line); overflow:hidden; }
+  .progress span { display:block; height:100%; background:var(--accent); transition:width .3s; }
+
+  .card { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow);
+          padding:18px; margin-bottom:16px; }
+  .card-head { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:14px; flex-wrap:wrap; }
+  .card-head p { color:var(--muted); margin:0; }
+  .card.flat { box-shadow:none; background:var(--surface-2); }
+  .grid { display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); }
+  .field label { display:block; font-size:12px; font-weight:600; color:var(--muted); margin:0 0 4px; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .row.end { justify-content:flex-end; }
+  .spacer { flex:1; }
+  .stack > * + * { margin-top:12px; }
+
+  /* controls */
+  input[type=text], input[type=search], input[type=number], select { width:100%; padding:8px 10px; border:1px solid var(--line);
+      border-radius:8px; background:var(--surface); outline:none; }
+  input:focus, select:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
+  input[type=checkbox] { width:16px; height:16px; accent-color:var(--accent-strong); margin:0; flex:none; }
+  .btn { padding:8px 14px; border-radius:8px; border:1px solid var(--line); background:var(--surface); cursor:pointer;
+         font-weight:600; white-space:nowrap; }
+  .btn:hover:not(:disabled) { background:var(--surface-2); }
+  .btn.primary { background:var(--accent); border-color:var(--accent); color:var(--accent-text); }
+  .btn.primary:hover:not(:disabled) { background:var(--accent-strong); }
+  .btn.danger { color:var(--err); border-color:var(--err); background:transparent; }
+  .btn.sm { padding:4px 10px; font-size:12.5px; }
+  .btn:disabled { opacity:.45; cursor:default; }
+  .check { display:flex; gap:8px; align-items:center; font-weight:500; }
+
+  /* feedback */
+  .alert { border-radius:8px; padding:10px 12px; margin:10px 0 0; font-size:13px; border:1px solid transparent; }
+  .alert.info { background:var(--info-soft); color:var(--info); }
+  .alert.ok { background:var(--ok-soft); color:var(--ok); }
+  .alert.warn { background:var(--warn-soft); color:var(--warn); }
+  .alert.err { background:var(--err-soft); color:var(--err); }
+  .alert ul { margin:6px 0 0; padding-left:18px; }
+  .empty { text-align:center; color:var(--muted); padding:28px 12px; }
+  .badge { display:inline-block; font-size:11.5px; font-weight:600; border-radius:999px; padding:1px 9px; background:var(--surface-2);
+           border:1px solid var(--line); color:var(--muted); white-space:nowrap; }
+  .badge.ok { background:var(--ok-soft); color:var(--ok); border-color:transparent; }
+  .badge.warn { background:var(--warn-soft); color:var(--warn); border-color:transparent; }
+  .badge.err { background:var(--err-soft); color:var(--err); border-color:transparent; }
+  .badge.info { background:var(--info-soft); color:var(--info); border-color:transparent; }
+  .meter { display:inline-flex; align-items:center; gap:8px; min-width:120px; }
+  .meter i { display:block; flex:1; height:6px; border-radius:3px; background:var(--line); overflow:hidden; min-width:56px; }
+  .meter i b { display:block; height:100%; background:var(--ok); }
+  .meter i b.part { background:var(--accent); } .meter i b.none { background:var(--err); }
+  .meter small { font-variant-numeric:tabular-nums; min-width:44px; text-align:right; }
+
+  /* tables */
+  .table-wrap { overflow-x:auto; border:1px solid var(--line); border-radius:10px; }
+  table { width:100%; border-collapse:collapse; }
+  th { text-align:left; font-size:11.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); background:var(--surface-2);
+       padding:8px 12px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  td { padding:9px 12px; border-bottom:1px solid var(--line); vertical-align:middle; }
+  tr:last-child td { border-bottom:0; }
+  tbody tr:hover { background:var(--surface-2); }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  td.pick, th.pick { width:34px; padding-right:0; }
+  td.title a, td.title button { background:none; border:0; padding:0; cursor:pointer; text-align:left; color:var(--text); font-weight:600; }
+  td.title button:hover { color:var(--accent-strong); text-decoration:underline; }
+  .toolbar { display:flex; align-items:center; gap:10px; margin:0 0 10px; flex-wrap:wrap; }
+  .toolbar .count { color:var(--muted); font-size:13px; }
+
+  .sub-card { border:1px solid var(--line); border-radius:10px; padding:12px; background:var(--surface-2); }
+  .sub-card + .sub-card { margin-top:10px; }
+  .kv { display:grid; grid-template-columns:auto 1fr; gap:2px 12px; font-size:13px; }
+  .kv dt { color:var(--muted); } .kv dd { margin:0; }
+  details > summary { cursor:pointer; font-weight:600; padding:4px 0; }
+  details ul { margin:6px 0 0; padding-left:20px; color:var(--muted); }
+  .change { font-size:13px; padding:2px 0; }
+  .change .arrow { color:var(--muted); }
+  @media (max-width:640px) {
+    .top-inner, main, nav.tabs, .status { padding-left:12px; padding-right:12px; }
+    .card { padding:14px; }
+  }
 </style>
 </head>
 <body>
-<main>
-  <h1>Plex Language Configurator</h1>
-  <p class="sub">Set audio and subtitle language for a whole series or movie, for one user.</p>
-  <div id="indexStatus" class="index-status">Checking library index…</div>
-
-  <section>
-    <h2>1. User</h2>
-    <select id="user"><option>Loading…</option></select>
-  </section>
-
+<header class="top">
+  <div class="top-inner">
+    <div class="brand"><div class="logo">PL</div><h1>Plex Language Configurator</h1></div>
+    <div class="userbox"><label for="user">Acting as</label><select id="user"><option>Loading…</option></select></div>
+  </div>
   <nav class="tabs" aria-label="Pages">
-    <button id="searchTab" type="button" aria-selected="true">Search & configure</button>
+    <button id="searchTab" type="button" aria-selected="true">Search &amp; configure</button>
     <button id="browseTab" type="button" aria-selected="false">Browse by language</button>
     <button id="missingTab" type="button" aria-selected="false">Missing Italian</button>
+    <button id="profilesTab" type="button" aria-selected="false" class="hidden">Sonarr / Radarr</button>
   </nav>
+</header>
+<div class="status"><div class="status-inner" id="indexStatus"><span class="dot busy"></span><span>Checking library index…</span></div></div>
 
-  <section id="searchSection">
-    <h2>2. Series or movie</h2>
-    <form class="row" id="searchForm">
-      <input id="q" placeholder="Search titles" autocomplete="off">
-      <button type="submit">Search</button>
-    </form>
-    <ul class="results" id="results"></ul>
-  </section>
+<main>
+  <!-- Search -->
+  <div id="searchPage">
+    <section class="card">
+      <div class="card-head"><div><h2>Find a series or movie</h2><p>Set audio and subtitle language for every episode in one go.</p></div></div>
+      <form class="row" id="searchForm">
+        <input type="search" id="q" placeholder="Search titles…" autocomplete="off" style="flex:1;min-width:200px">
+        <button class="btn primary" type="submit">Search</button>
+      </form>
+      <div id="results" class="stack" style="margin-top:12px"></div>
+    </section>
 
-  <section id="browseSection" class="hidden">
-    <h2>Browse library by language</h2>
-    <p class="meta">Find every movie or series containing a selected audio or subtitle language. Select a result to configure it.</p>
-    <div class="browse-controls">
-      <div>
-        <label for="browseKind">Language type</label>
-        <select id="browseKind"><option value="audio">Audio</option><option value="subtitles">Subtitles</option></select>
+    <section class="card hidden" id="langSection">
+      <div class="card-head"><div><h2 id="titleName">—</h2><p id="titleInfo"></p></div>
+        <span class="badge" id="titleType"></span></div>
+      <div class="grid">
+        <div class="field"><label for="audio">Audio</label><select id="audio"></select></div>
+        <div class="field"><label for="subs">Subtitles</label><select id="subs"></select></div>
       </div>
-      <div>
-        <label for="browseType">Media type</label>
-        <select id="browseType"><option value="all">Movies and series</option><option value="movie">Movies only</option><option value="show">Series only</option></select>
+      <div class="row" style="margin-top:14px">
+        <button class="btn" id="preview" type="button">Preview</button>
+        <button class="btn primary" id="apply" type="button">Apply</button>
       </div>
-      <div>
-        <label for="browseLanguage">Language</label>
-        <select id="browseLanguage" disabled><option value="">Load languages first</option></select>
-      </div>
-      <div id="sortWrap">
-        <label for="browseSort">Sort by</label>
-        <select id="browseSort"><option value="title">Title</option></select>
-      </div>
-      <div>
-        <label for="browseOrder">Order</label>
-        <select id="browseOrder"><option value="asc">Ascending</option><option value="desc">Descending</option></select>
-      </div>
-      <div style="align-self:end">
-        <button id="refreshBrowse" type="button">Full rescan</button>
-      </div>
-    </div>
-    <div id="browseMeta" class="browse-meta"></div>
-    <div class="actions">
-      <button id="bazarrSearch" type="button" disabled>Search missing subtitles in Bazarr</button>
-    </div>
-    <p id="bazarrHint" class="meta">Available when browsing audio languages and Bazarr is configured. Configure a profile for the selected audio language, or leave it unchanged to retain each title's current Bazarr profile.</p>
-    <div id="bazarrProfileMap" class="profile-map hidden">
-      <label for="bazarrProfile">Bazarr subtitle profile for this audio language</label>
-      <select id="bazarrProfile"><option value="">Keep each title's existing profile</option></select>
-      <div class="actions">
-        <button id="saveBazarrMapping" type="button">Save language mapping</button>
-        <button id="removeBazarrMapping" type="button">Remove mapping</button>
-      </div>
-      <p id="bazarrMappingStatus" class="meta">Mappings are saved on the configurator server. Mount /data to persistent Unraid appdata to retain them across container replacement.</p>
-    </div>
-    <div id="bazarrSuggestion" class="profile-map hidden"></div>
-    <ul class="results" id="browseResults"></ul>
-  </section>
+      <div id="out"></div>
+    </section>
+  </div>
 
-  <section id="missingSection" class="hidden">
-    <h2 id="missingHeading">Missing Italian</h2>
-    <p class="meta" id="missingIntro">Series and movies without Italian, or with it in only some episodes. Select one to configure it.</p>
-    <div class="browse-controls">
-      <div>
-        <label for="missingKind">Missing</label>
-        <select id="missingKind">
-          <option value="either">Audio or subtitles</option>
-          <option value="audio">Audio</option>
-          <option value="subtitles">Subtitles</option>
-          <option value="both">Both audio and subtitles</option>
-        </select>
+  <!-- Browse -->
+  <div id="browsePage" class="hidden">
+    <section class="card">
+      <div class="card-head"><div><h2>Browse by language</h2><p>Every movie or series that has a language, as the selected user sees the library.</p></div>
+        <button class="btn" id="refreshBrowse" type="button" title="Re-read every title from Plex in the background">Full rescan</button></div>
+      <div class="grid">
+        <div class="field"><label for="browseKind">Language type</label><select id="browseKind"><option value="audio">Audio</option><option value="subtitles">Subtitles</option></select></div>
+        <div class="field"><label for="browseType">Media type</label><select id="browseType"><option value="all">Movies and series</option><option value="movie">Movies only</option><option value="show">Series only</option></select></div>
+        <div class="field"><label for="browseLanguage">Language</label><select id="browseLanguage" disabled><option value="">Loading…</option></select></div>
+        <div class="field"><label for="browseSort">Sort by</label><select id="browseSort"><option value="title">Title</option></select></div>
+        <div class="field"><label for="browseOrder">Order</label><select id="browseOrder"><option value="asc">Ascending</option><option value="desc">Descending</option></select></div>
       </div>
-      <div>
-        <label for="missingType">Media type</label>
-        <select id="missingType"><option value="all">Movies and series</option><option value="movie">Movies only</option><option value="show">Series only</option></select>
+      <div id="browseMeta" class="muted" style="margin-top:10px"></div>
+    </section>
+    <section class="card">
+      <div class="toolbar"><span class="count" id="browseCount"></span><span class="spacer"></span>
+        <button class="btn" id="bazarrSearch" type="button" disabled>Search missing subtitles in Bazarr</button></div>
+      <div id="browseResults"></div>
+    </section>
+  </div>
+
+  <!-- Missing -->
+  <div id="missingPage" class="hidden">
+    <section class="card">
+      <div class="card-head"><div><h2 id="missingHeading">Missing Italian</h2><p id="missingIntro"></p></div></div>
+      <div class="grid">
+        <div class="field"><label for="missingKind">Missing</label><select id="missingKind">
+          <option value="either">Audio or subtitles</option><option value="audio">Audio</option><option value="subtitles">Subtitles</option><option value="both">Both audio and subtitles</option></select></div>
+        <div class="field"><label for="missingType">Media type</label><select id="missingType"><option value="all">Movies and series</option><option value="movie">Movies only</option><option value="show">Series only</option></select></div>
+        <div class="field"><label for="missingSort">Sort by</label><select id="missingSort"><option value="missing">Most missing first</option><option value="title">Title</option></select></div>
       </div>
-      <div>
-        <label for="missingSort">Sort by</label>
-        <select id="missingSort"><option value="missing">Most missing first</option><option value="title">Title</option></select>
+    </section>
+
+    <section class="card hidden" id="arrPanel">
+      <div class="card-head"><div><h2>Get an Italian version</h2>
+        <p>Tick titles in the list, then preview. Sonarr searches only the episodes without Italian, Radarr searches the movie, anything they don't manage goes to Seerr. Nothing is sent until you start.</p></div>
+        <a href="#" id="toProfiles" class="hidden">Check or tune profiles →</a></div>
+      <div class="row"><button class="btn" id="arrPreviewBtn" type="button" disabled>Preview request</button></div>
+      <div id="arrPreview" class="hidden stack" style="margin-top:12px">
+        <div class="table-wrap"><table><thead><tr><th class="pick"></th><th>Title</th><th>Via</th><th>What will happen</th></tr></thead><tbody id="arrPreviewItems"></tbody></table></div>
+        <label class="check"><input type="checkbox" id="arrChangeProfiles" checked> Switch titles to the Italian quality profile where shown</label>
+        <div class="row"><button class="btn primary" id="arrStart" type="button">Start requests</button></div>
       </div>
-    </div>
-    <div class="actions">
-      <button id="missingCsv" type="button">Download CSV</button>
-      <button id="missingBazarr" type="button" disabled>Search Bazarr for missing subtitles</button>
-    </div>
-    <div id="missingMeta" class="browse-meta"></div>
-    <div class="profile-map" id="labelPanel">
-      <strong id="labelHeading">Plex label</strong>
-      <p id="labelSummary" class="meta">Loading…</p>
-      <div class="actions"><button id="labelSync" type="button" disabled>Add label in Plex</button></div>
+      <div id="arrJob"></div>
+    </section>
+
+    <section class="card" id="labelPanel">
+      <div class="card-head"><div><h2 id="labelHeading">Plex label</h2><p id="labelSummary">Loading…</p></div>
+        <button class="btn" id="labelSync" type="button" disabled>Update labels in Plex</button></div>
       <details id="labelDetails" class="hidden"><summary>Titles that would change</summary><ul id="labelList"></ul></details>
+    </section>
+
+    <section class="card">
+      <div class="toolbar"><label class="check hidden" id="arrAllWrap"><input type="checkbox" id="arrSelectAll"> Select all</label>
+        <span class="count" id="missingMeta"></span><span class="spacer"></span>
+        <button class="btn" id="missingCsv" type="button">Download CSV</button>
+        <button class="btn" id="missingBazarr" type="button" disabled>Search Bazarr for missing subtitles</button></div>
+      <div id="missingResults"></div>
+    </section>
+  </div>
+
+  <!-- Bazarr (shared by Browse and Missing) -->
+  <section class="card hidden" id="bazarrPanel">
+    <div class="card-head"><div><h2>Bazarr</h2><p id="bazarrHint">Search for subtitles in Bazarr for titles in the list above.</p></div>
+      <button class="btn sm" id="bazarrHistory" type="button">Job history</button></div>
+    <div id="bazarrProfileMap" class="sub-card hidden">
+      <div class="field"><label for="bazarrProfile">Bazarr subtitle profile for the selected audio language</label>
+        <select id="bazarrProfile"><option value="">Keep each title's existing profile</option></select></div>
+      <div class="row" style="margin-top:8px"><button class="btn sm" id="saveBazarrMapping" type="button">Save mapping</button>
+        <button class="btn sm" id="removeBazarrMapping" type="button">Remove mapping</button></div>
+      <p id="bazarrMappingStatus" class="muted" style="margin:8px 0 0"></p>
+      <div id="bazarrSuggestion" class="hidden" style="margin-top:8px"></div>
     </div>
-    <div class="profile-map hidden" id="arrPanel">
-      <strong>Get an Italian version</strong>
-      <p class="meta">Tick titles below, then preview. Sonarr searches only the episodes without Italian; Radarr searches the movie; titles they don't manage go to Seerr. Nothing changes until you start.</p>
-      <details id="arrSetup"><summary>Setup check (Sonarr / Radarr / Seerr)</summary><div id="arrSetupBody" class="meta">Loading…</div></details>
-      <div class="actions">
-        <label style="margin:0;font-weight:normal"><input type="checkbox" id="arrSelectAll" style="width:auto"> Select all listed</label>
-        <button id="arrPreviewBtn" type="button" disabled>Preview request</button>
-      </div>
-      <div id="arrPreview" class="hidden">
-        <div id="arrPreviewItems"></div>
-        <label style="font-weight:normal"><input type="checkbox" id="arrChangeProfiles" checked style="width:auto"> Switch titles to the Italian quality profile where shown</label>
-        <div class="actions"><button id="arrStart" type="button" class="primary">Start requests</button></div>
-      </div>
-      <div id="arrJob" class="msg"></div>
+    <div id="bazarrResult"></div>
+    <div id="bazarrPreview" class="hidden stack" style="margin-top:12px">
+      <p id="bazarrPreviewSummary" class="muted"></p>
+      <label class="check"><input id="bazarrSelectAll" type="checkbox" checked> Select all matched titles</label>
+      <div class="table-wrap"><table><tbody id="bazarrPreviewItems"></tbody></table></div>
+      <div class="row"><button class="btn primary" id="bazarrStartSelected" type="button">Start selected searches</button></div>
+      <p class="muted">Profile changes apply to the title globally in Bazarr, not just for this user. Searches may download subtitles.</p>
     </div>
-    <ul class="results" id="missingResults"></ul>
+    <div id="bazarrJob" class="hidden">
+      <span id="bazarrJobText"></span>
+      <div class="row" style="margin-top:6px"><button class="btn sm hidden" id="bazarrCancelJob" type="button">Cancel</button>
+        <button class="btn sm hidden" id="bazarrRetryJob" type="button">Retry failed</button></div>
+      <div id="bazarrJobDetails"></div>
+    </div>
   </section>
 
-  <section id="bazarrPanel" class="hidden">
-    <h2>Bazarr</h2>
-    <div id="bazarrResult" class="msg"></div>
-    <div id="bazarrPreview" class="bulk-preview hidden">
-      <h3>Bulk operation preview</h3>
-      <p id="bazarrPreviewSummary" class="meta"></p>
-      <label><input id="bazarrSelectAll" type="checkbox" checked> Select all matched titles</label>
-      <div id="bazarrPreviewItems"></div>
-      <div class="actions"><button id="bazarrStartSelected" type="button" class="primary">Start selected searches</button></div>
-      <p class="meta">Profile changes affect the media item globally in Bazarr, not just the selected Plex Home user. Searches may download subtitles.</p>
-    </div>
-    <div id="bazarrJob" class="msg"><span id="bazarrJobText"></span><div class="actions"><button id="bazarrCancelJob" type="button" class="hidden">Cancel job</button><button id="bazarrRetryJob" type="button" class="hidden">Retry failed titles</button><button id="bazarrHistory" type="button">View job history</button></div><div id="bazarrJobDetails"></div></div>
-  </section>
-
-  <section id="langSection" class="hidden">
-    <h2>3. Languages</h2>
-    <div id="titleInfo"></div>
-    <label for="audio">Audio</label>
-    <select id="audio"></select>
-    <label for="subs">Subtitles</label>
-    <select id="subs"></select>
-    <div class="actions">
-      <button id="preview">Preview</button>
-      <button id="apply" class="primary">Apply</button>
-    </div>
-    <div id="out" class="msg"></div>
-  </section>
+  <!-- Sonarr / Radarr -->
+  <div id="profilesPage" class="hidden">
+    <section class="card">
+      <div class="card-head"><div><h2>Setup check</h2><p>Read-only. Shows whether each quality profile would prefer an Italian release and replace your current file.</p></div>
+        <button class="btn" id="setupRefresh" type="button">Re-check</button></div>
+      <div id="setupBody" class="muted">Loading…</div>
+    </section>
+    <section class="card" id="optimizeCard">
+      <div class="card-head"><div><h2>Optimise profiles for Italian, English and Japanese</h2>
+        <p>Adds scored custom formats so releases carrying more of your languages win, and fixes cutoff, upgrade and language settings that would block them. Preview first. Nothing changes until you confirm, and a backup is saved so you can undo.</p></div></div>
+      <div class="grid" style="max-width:640px">
+        <div class="field"><label for="scoreIta">Italian score</label><input type="number" id="scoreIta" value="200"></div>
+        <div class="field"><label for="scoreEng">English score</label><input type="number" id="scoreEng" value="100"></div>
+        <div class="field"><label for="scoreJpn">Japanese score</label><input type="number" id="scoreJpn" value="100"></div>
+        <div class="field"><label for="scoreMulti">MULTi / Dual audio bonus</label><input type="number" id="scoreMulti" value="50"></div>
+      </div>
+      <p class="muted" style="margin-top:8px">Scores add up, so a release with Italian + English + Japanese beats one with a single language. Scores you already set higher are never lowered.</p>
+      <div class="row" id="optimizeButtons"></div>
+      <div id="optimizeResult"></div>
+    </section>
+    <section class="card">
+      <div class="card-head"><div><h2>Backups</h2><p>Created automatically before every change. Restore puts the original profiles back and removes the custom formats this tool added.</p></div></div>
+      <div id="backupList" class="muted">Loading…</div>
+    </section>
+  </div>
 </main>
 
 <script>
 const $ = (id) => document.getElementById(id);
-let current = null; // { key, title }
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const JSON_POST = (body, method = 'POST') => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const alertBox = (kind, html) => `<div class="alert ${kind}">${html}</div>`;
+const typeBadge = (t) => `<span class="badge">${t === 'show' ? 'Series' : 'Movie'}</span>`;
 
 async function api(path, opts) {
   const res = await fetch(path, opts);
@@ -227,191 +307,52 @@ async function api(path, opts) {
   if (!res.ok) throw new Error(data.error || res.statusText);
   return data;
 }
-function esc(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-function showError(el, e) { el.className = 'msg err'; el.textContent = e.message; }
 
-async function loadUsers() {
-  try {
-    const users = await api('/api/users');
-    $('user').innerHTML = users.map(u =>
-      `<option value="${esc(u.title)}">${esc(u.title)}${u.admin ? ' (admin)' : ''}</option>`).join('');
-  } catch (e) { $('user').innerHTML = `<option>Error: ${esc(e.message)}</option>`; }
+function meter(count, total, movie) {
+  if (movie) return count ? '<span class="badge ok">Yes</span>' : '<span class="badge err">None</span>';
+  if (!total) return '<span class="muted">—</span>';
+  const pct = Math.round(100 * count / total);
+  const cls = count === total ? '' : count ? 'part' : 'none';
+  return `<span class="meter"><i><b class="${cls}" style="width:${pct}%"></b></i><small>${count}/${total}</small></span>`;
 }
 
+function table(head, rows, empty) {
+  if (!rows.length) return `<div class="empty">${esc(empty)}</div>`;
+  return `<div class="table-wrap"><table><thead><tr>${head.map(h => `<th class="${h.cls || ''}">${h.text || ''}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
+}
+
+/* ---------- state ---------- */
+let currentPage = 'search';
+let current = null;
+let config = { focus_language: 'ita', focus_name: 'Italian', bazarr_configured: false, arr_configured: false, labels: { label: 'Italian' } };
+let indexWasBusy = false;
+
+/* ---------- navigation ---------- */
+function showPage(page) {
+  currentPage = page;
+  for (const name of ['search', 'browse', 'missing', 'profiles']) {
+    $(`${name}Page`).classList.toggle('hidden', page !== name);
+    $(`${name}Tab`).setAttribute('aria-selected', String(page === name));
+  }
+  $('bazarrPanel').classList.toggle('hidden', !(config.bazarr_configured && (page === 'browse' || page === 'missing')));
+  if (page === 'browse') loadBrowseLanguages(false);
+  if (page === 'missing') { loadMissing(); loadLabelPlan(); }
+  if (page === 'profiles') { loadSetup(); loadBackups(); }
+  window.scrollTo({ top: 0 });
+}
+for (const name of ['search', 'browse', 'missing', 'profiles']) $(`${name}Tab`).onclick = () => showPage(name);
+$('toProfiles').onclick = (e) => { e.preventDefault(); showPage('profiles'); };
 $('user').addEventListener('change', () => {
   if (current) selectTitle(current);
   if (currentPage === 'browse') loadBrowseLanguages(false);
   if (currentPage === 'missing') loadMissing();
 });
 
-$('searchForm').addEventListener('submit', async (ev) => {
-  ev.preventDefault();
-  const q = $('q').value.trim();
-  if (!q) return;
-  $('results').innerHTML = '<li class="meta">Searching…</li>';
+async function loadUsers() {
   try {
-    const items = await api(`/api/search?user=${encodeURIComponent($('user').value)}&q=${encodeURIComponent(q)}`);
-    $('results').innerHTML = items.length ? '' : '<li class="meta">No matches.</li>';
-    for (const it of items) {
-      const li = document.createElement('li');
-      const b = document.createElement('button');
-      b.innerHTML = `${esc(it.title)} <span class="meta">${it.year ?? ''} · ${it.type === 'show' ? 'Series' : 'Movie'}</span>`;
-      b.onclick = () => selectTitle(it);
-      li.appendChild(b);
-      $('results').appendChild(li);
-    }
-  } catch (e) { $('results').innerHTML = `<li class="msg err">${esc(e.message)}</li>`; }
-});
-
-async function selectTitle(it) {
-  current = it;
-  $('langSection').classList.remove('hidden');
-  $('titleInfo').innerHTML = `<strong>${esc(it.title)}</strong> <span class="meta">loading languages…</span>`;
-  $('audio').innerHTML = $('subs').innerHTML = '';
-  $('out').textContent = '';
-  setBusy(true);
-  try {
-    const d = await api(`/api/languages?user=${encodeURIComponent($('user').value)}&key=${it.key}`);
-    const fmt = (o) => o.count === o.total ? o.name : `${o.name} (${o.count}/${o.total})`;
-    $('titleInfo').innerHTML = `<strong>${esc(d.title)}</strong> <span class="meta">${d.total} ${d.type === 'movie' ? 'file' : 'episodes'}</span>`;
-    $('audio').innerHTML = '<option value="">Don\'t change</option>' +
-      d.audio.map(o => `<option value="${esc(o.code)}">${esc(fmt(o))}</option>`).join('');
-    $('subs').innerHTML = '<option value="">Don\'t change</option><option value="off">Off</option>' +
-      d.subtitles.map(o => `<option value="${esc(o.code)}">${esc(fmt(o))}</option>`).join('');
-  } catch (e) { showError($('out'), e); }
-  setBusy(false);
-}
-
-function setBusy(b) { $('preview').disabled = $('apply').disabled = b; }
-
-function describe(kind, r, total) {
-  if (!r) return '';
-  const all = r.matched === total;
-  const head = `<div><span class="${all ? 'ok' : 'warn'}">${kind}: ${r.matched} of ${total}</span></div>`;
-  if (!r.missing.length) return head;
-  return head + `<details><summary>${r.missing.length} without this language (left unchanged)</summary><ul>` +
-    r.missing.map(m => `<li>${esc(m)}</li>`).join('') + '</ul></details>';
-}
-
-async function run(dry) {
-  const audio = $('audio').value, subtitles = $('subs').value;
-  const out = $('out');
-  if (!audio && !subtitles) { out.className = 'msg'; out.textContent = 'Pick an audio or subtitle language first.'; return; }
-  if (!dry && !confirm(`Apply to "${current.title}" for ${$('user').value}?`)) return;
-  setBusy(true);
-  out.className = 'msg'; out.textContent = dry ? 'Checking…' : 'Applying…';
-  try {
-    const r = await api('/api/apply', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user: $('user').value, key: current.key, audio, subtitles, dry_run: dry }) });
-    out.innerHTML = describe('Audio', r.audio, r.total) + describe('Subtitles', r.subtitles, r.total) +
-      `<p>${dry ? `Preview only: ${r.files} file(s) would be updated.` : `<span class="ok">Done: ${r.updated} file(s) updated.</span>`}</p>`;
-  } catch (e) { showError(out, e); }
-  setBusy(false);
-}
-$('preview').onclick = () => run(true);
-$('apply').onclick = () => run(false);
-
-
-let currentPage = 'search';
-let config = { focus_language: 'ita', focus_name: 'Italian', bazarr_configured: false, labels: { label: 'Italian' } };
-
-function showPage(page) {
-  currentPage = page;
-  for (const name of ['search', 'browse', 'missing']) {
-    $(`${name}Section`).classList.toggle('hidden', page !== name);
-    $(`${name}Tab`).setAttribute('aria-selected', String(page === name));
-  }
-  $('langSection').classList.add('hidden');
-  $('bazarrPanel').classList.toggle('hidden', page === 'search' || !config.bazarr_configured);
-  if (page === 'browse') loadBrowseLanguages(false);
-  if (page === 'missing') { loadMissing(); loadLabelPlan(); }
-}
-$('searchTab').onclick = () => showPage('search');
-$('browseTab').onclick = () => showPage('browse');
-$('missingTab').onclick = () => showPage('missing');
-$('missingKind').onchange = () => loadMissing();
-$('missingType').onchange = () => loadMissing();
-$('missingSort').onchange = () => loadMissing();
-$('missingCsv').onclick = () => { window.location = `/api/missing?${missingParams()}&format=csv`; };
-$('missingBazarr').onclick = () => runBazarrSearch('missing-subtitles');
-$('labelSync').onclick = () => syncLabels();
-$('arrSelectAll').onchange = () => { document.querySelectorAll('.arr-pick').forEach(x => x.checked = $('arrSelectAll').checked); updateArrButton(); };
-$('arrPreviewBtn').onclick = () => arrPreview();
-$('arrStart').onclick = () => arrStart();
-$('arrSetup').addEventListener('toggle', () => { if ($('arrSetup').open) loadArrSetup(); });
-
-function updateArrButton() {
-  const n = document.querySelectorAll('.arr-pick:checked').length;
-  $('arrPreviewBtn').disabled = !n;
-  $('arrPreviewBtn').textContent = n ? `Preview request (${n})` : 'Preview request';
-}
-
-async function loadArrSetup() {
-  const body = $('arrSetupBody');
-  body.textContent = 'Reading Sonarr / Radarr / Seerr settings…';
-  try {
-    const d = await api('/api/arr/config');
-    const out = [];
-    for (const name of ['sonarr', 'radarr']) {
-      const r = d[name];
-      if (!r.configured) { out.push(`<p><strong>${name}</strong>: not configured.</p>`); continue; }
-      if (r.error) { out.push(`<p><strong>${name}</strong>: <span class="warn">${esc(r.error)}</span></p>`); continue; }
-      const profiles = r.profiles.map(p => `<li>${esc(p.name)} — Italian score ${p.italian_score}` +
-        (p.italian_formats.length ? ` (${p.italian_formats.map(f => esc(f.name) + ' ' + f.score).join(', ')})` : '') +
-        (p.ready ? ' <span class="ok">ready</span>' : '') +
-        (p.problems.length ? `<br>${p.problems.map(esc).join('<br>')}` : '') + '</li>').join('');
-      out.push(`<p><strong>${name} ${esc(r.version)}</strong>: ${r.managed} titles. Italian profile used: ` +
-        `${r.target_profile ? esc(r.target_profile.name) : '<span class="warn">none (titles keep their own profile)</span>'}</p>` +
-        r.warnings.map(w => `<p class="warn">${esc(w)}</p>`).join('') + `<ul>${profiles}</ul>`);
-    }
-    const s = d.seerr;
-    if (!s.configured) out.push('<p><strong>seerr</strong>: not configured.</p>');
-    else if (s.error) out.push(`<p><strong>seerr</strong>: <span class="warn">${esc(s.error)}</span></p>`);
-    else out.push(`<p><strong>seerr ${esc(s.version || '')}</strong>: ` +
-      [...s.sonarr_servers.map(x => `Sonarr "${esc(x.name)}"`), ...s.radarr_servers.map(x => `Radarr "${esc(x.name)}"`)].join(', ') + '</p>');
-    out.push(`<p>Request mode: ${esc(d.mode)}</p>`);
-    body.innerHTML = out.join('');
-  } catch (e) { body.textContent = e.message; }
-}
-
-async function arrPreview() {
-  const keys = [...document.querySelectorAll('.arr-pick:checked')].map(x => x.value);
-  if (!keys.length) return;
-  $('arrJob').textContent = 'Checking Sonarr / Radarr / Seerr…';
-  $('arrPreview').classList.add('hidden');
-  try {
-    const kind = $('missingKind').value === 'subtitles' ? 'subtitles' : 'audio';
-    const d = await api('/api/arr/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user: $('user').value, keys, kind }) });
-    window.arrPreviewData = d;
-    $('arrPreviewItems').innerHTML = d.rows.map(r => `<div class="bulk-item"><input type="checkbox" class="arr-run" value="${esc(r.key)}" ${r.service ? 'checked' : 'disabled'}>` +
-      `<div><strong>${esc(r.title)}</strong> <span class="status-pill">${esc(r.service || 'skip')}</span>` +
-      `<small>${esc(r.action)}${r.current_profile ? ` · profile ${esc(r.current_profile)}${r.profile_change ? ' → ' + esc(r.target_profile) : ''}` : ''}</small>` +
-      (r.problems || []).map(p => `<small class="warn">${esc(p)}</small>`).join('') + '</div></div>').join('');
-    $('arrPreview').classList.remove('hidden');
-    $('arrJob').textContent = `${d.actionable} of ${d.rows.length} title(s) can be requested; ${d.profile_changes} profile change(s). Nothing has been sent yet.`;
-  } catch (e) { showError($('arrJob'), e); }
-}
-
-async function arrStart() {
-  const d = window.arrPreviewData; if (!d) return;
-  const keys = [...document.querySelectorAll('.arr-run:checked')].map(x => x.value);
-  if (!keys.length) return;
-  const change = $('arrChangeProfiles').checked;
-  if (!confirm(`Send ${keys.length} request(s)?${change && d.profile_changes ? ' Quality profiles will change in Sonarr/Radarr for the listed titles.' : ''} Downloads may start and existing files may be replaced.`)) return;
-  $('arrStart').disabled = true;
-  try {
-    const job = await api('/api/arr/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ preview_id: d.preview_id, keys, change_profiles: change }) });
-    for (let i = 0; i < 600; i++) {
-      const j = await api(`/api/arr/jobs/${job.job_id}`);
-      $('arrJob').innerHTML = `Requests ${esc(j.status)}: ${j.completed}/${j.total}` + (j.results.length ?
-        `<ul>${j.results.map(r => `<li>${esc(r.title)}: ${r.status === 'success' ? esc(r.detail) : `<span class="warn">${esc(r.error)}</span>`}</li>`).join('')}</ul>` : '');
-      if (j.status === 'completed') break;
-      await new Promise(res => setTimeout(res, 1500));
-    }
-  } catch (e) { showError($('arrJob'), e); }
-  $('arrStart').disabled = false;
+    const users = await api('/api/users');
+    $('user').innerHTML = users.map(u => `<option value="${esc(u.title)}">${esc(u.title)}${u.admin ? ' (admin)' : ''}</option>`).join('');
+  } catch (e) { $('user').innerHTML = `<option>${esc(e.message)}</option>`; }
 }
 
 async function loadConfig() {
@@ -421,6 +362,8 @@ async function loadConfig() {
   $('missingHeading').textContent = `Missing ${name}`;
   $('missingIntro').textContent = `Series and movies without ${name}, or with it in only some episodes. Select one to configure it.`;
   $('labelHeading').textContent = `Plex label "${config.labels.label}"`;
+  $('profilesTab').classList.toggle('hidden', !config.arr_configured);
+  $('toProfiles').classList.toggle('hidden', !config.arr_configured);
 }
 
 function ago(ts) {
@@ -431,67 +374,184 @@ function ago(ts) {
   return `${Math.round(s / 86400)} days ago`;
 }
 
-let indexWasRunning = false;
+/* ---------- index status ---------- */
 async function pollIndex() {
   let delay = 30000;
   try {
     const { index: i, labels } = await api('/api/index/status');
-    const parts = [];
-    if (i.ready) parts.push(`Library index: ${i.titles} titles, updated ${ago(i.built_at)}.`);
-    else parts.push('Building the library index for the first time. Pages fill in as each library finishes.');
-    if (i.state === 'running') {
-      parts.push(`${i.mode === 'full' ? 'Full rescan' : 'Checking for changes'}: ${i.phase}${i.total ? ` (${i.done}/${i.total})` : ''}…`);
-      delay = 3000;
-    }
-    if (labels && labels.state === 'running') { parts.push(`Labelling ${labels.done}/${labels.total}…`); delay = 3000; }
-    if (i.last_error) parts.push(`Last refresh error: ${i.last_error}`);
+    const busy = i.state === 'running' || (labels && labels.state === 'running');
+    let text = i.ready ? `Library index: ${i.titles} titles, updated ${ago(i.built_at)}.` : 'Building the library index for the first time. Pages fill in as each library finishes.';
+    if (i.state === 'running') { text += ` ${i.mode === 'full' ? 'Full rescan' : 'Checking for changes'}: ${i.phase}${i.total ? ` (${i.done}/${i.total})` : ''}…`; delay = 3000; }
+    if (labels && labels.state === 'running') { text += ` Labelling ${labels.done}/${labels.total}…`; delay = 3000; }
     const pct = i.state === 'running' && i.total ? Math.round(100 * i.done / i.total) : null;
-    $('indexStatus').innerHTML = esc(parts.join(' ')) + (pct !== null ? `<div class="bar"><span style="width:${pct}%"></span></div>` : '');
-    // When a refresh finishes, reload whatever page is open so it shows new data.
-    if (indexWasRunning && i.state !== 'running') {
+    $('indexStatus').innerHTML = `<span class="dot ${i.last_error ? 'bad' : busy || !i.ready ? 'busy' : ''}"></span><span>${esc(text)}</span>` +
+      (pct !== null ? `<span class="progress"><span style="width:${pct}%"></span></span>` : '') +
+      (i.last_error ? `<span class="err">${esc(i.last_error)}</span>` : '');
+    if (indexWasBusy && !busy) {
       if (currentPage === 'browse') loadBrowseLanguages(false);
       if (currentPage === 'missing') { loadMissing(); loadLabelPlan(); }
     }
-    indexWasRunning = i.state === 'running' || (labels && labels.state === 'running');
-  } catch (e) { $('indexStatus').textContent = `Library index status unavailable: ${e.message}`; }
+    indexWasBusy = busy;
+  } catch (e) { $('indexStatus').innerHTML = `<span class="dot bad"></span><span>Index status unavailable: ${esc(e.message)}</span>`; }
   setTimeout(pollIndex, delay);
 }
 
-function missingParams() {
-  return new URLSearchParams({ user: $('user').value, language: config.focus_language,
-    kind: $('missingKind').value, type: $('missingType').value, sort: $('missingSort').value });
+/* ---------- search & configure ---------- */
+$('searchForm').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const q = $('q').value.trim();
+  if (!q) return;
+  $('results').innerHTML = '<div class="empty">Searching…</div>';
+  try {
+    const items = await api(`/api/search?user=${encodeURIComponent($('user').value)}&q=${encodeURIComponent(q)}`);
+    $('results').innerHTML = table([{ text: 'Title' }, { text: 'Year' }, { text: 'Type' }],
+      items.map((it, n) => `<tr><td class="title"><button data-n="${n}">${esc(it.title)}</button></td><td>${it.year ?? ''}</td><td>${typeBadge(it.type)}</td></tr>`), 'No matches.');
+    $('results').querySelectorAll('button[data-n]').forEach(b => b.onclick = () => selectTitle(items[b.dataset.n]));
+  } catch (e) { $('results').innerHTML = alertBox('err', esc(e.message)); }
+});
+
+async function selectTitle(it) {
+  current = it;
+  $('langSection').classList.remove('hidden');
+  $('titleName').textContent = it.title;
+  $('titleInfo').textContent = 'Loading languages…';
+  $('titleType').textContent = it.type === 'show' ? 'Series' : 'Movie';
+  $('audio').innerHTML = $('subs').innerHTML = '';
+  $('out').innerHTML = '';
+  setBusy(true);
+  try {
+    const d = await api(`/api/languages?user=${encodeURIComponent($('user').value)}&key=${it.key}`);
+    const fmt = (o) => o.count === o.total ? o.name : `${o.name} (${o.count}/${o.total})`;
+    $('titleInfo').textContent = `${d.total} ${d.type === 'movie' ? 'file' : 'episodes'}`;
+    $('audio').innerHTML = '<option value="">Don\'t change</option>' + d.audio.map(o => `<option value="${esc(o.code)}">${esc(fmt(o))}</option>`).join('');
+    $('subs').innerHTML = '<option value="">Don\'t change</option><option value="off">Off</option>' + d.subtitles.map(o => `<option value="${esc(o.code)}">${esc(fmt(o))}</option>`).join('');
+    setBusy(false);
+  } catch (e) { $('out').innerHTML = alertBox('err', esc(e.message)); $('titleInfo').textContent = ''; }
+  $('langSection').scrollIntoView({ block: 'nearest' });
+}
+function setBusy(b) { $('preview').disabled = $('apply').disabled = b; }
+
+function describe(kind, r, total) {
+  if (!r) return '';
+  const all = r.matched === total;
+  let html = `<div class="${all ? 'ok' : 'warn'}"><strong>${kind}: ${r.matched} of ${total}</strong></div>`;
+  if (r.missing.length) html += `<details><summary>${r.missing.length} without this language (left unchanged)</summary><ul>${r.missing.map(m => `<li>${esc(m)}</li>`).join('')}</ul></details>`;
+  return html;
+}
+
+async function run(dry) {
+  const audio = $('audio').value, subtitles = $('subs').value, out = $('out');
+  if (!audio && !subtitles) { out.innerHTML = alertBox('warn', 'Pick an audio or subtitle language first.'); return; }
+  if (!dry && !confirm(`Apply to "${current.title}" for ${$('user').value}?`)) return;
+  setBusy(true);
+  out.innerHTML = alertBox('info', dry ? 'Checking…' : 'Applying…');
+  try {
+    const r = await api('/api/apply', JSON_POST({ user: $('user').value, key: current.key, audio, subtitles, dry_run: dry }));
+    out.innerHTML = alertBox(dry ? 'info' : 'ok', describe('Audio', r.audio, r.total) + describe('Subtitles', r.subtitles, r.total) +
+      `<div style="margin-top:6px">${dry ? `Preview only: ${r.files} file(s) would be updated.` : `<strong>Done: ${r.updated} file(s) updated.</strong>`}</div>`);
+  } catch (e) { out.innerHTML = alertBox('err', esc(e.message)); }
+  setBusy(false);
+}
+$('preview').onclick = () => run(true);
+$('apply').onclick = () => run(false);
+const openTitle = (it) => { showPage('search'); selectTitle(it); };
+
+/* ---------- browse ---------- */
+$('browseKind').onchange = () => loadBrowseLanguages(false);
+$('browseType').onchange = () => { updateBrowseSortOptions(); loadBrowseResults(); };
+$('browseLanguage').onchange = () => { syncBazarrMappingSelection(); loadBrowseResults(); };
+$('browseSort').onchange = $('browseOrder').onchange = () => loadBrowseResults();
+$('refreshBrowse').onclick = () => loadBrowseLanguages(true);
+
+function updateBrowseSortOptions() {
+  const shows = $('browseType').value === 'show', cur = $('browseSort').value;
+  $('browseSort').innerHTML = '<option value="title">Title</option>' + (shows ? '<option value="episodes">Episode count</option><option value="percentage">Language coverage</option>' : '');
+  $('browseSort').value = [...$('browseSort').options].some(o => o.value === cur) ? cur : 'title';
+}
+
+async function loadBrowseLanguages(refresh) {
+  const kind = $('browseKind').value;
+  $('browseLanguage').disabled = true;
+  $('browseLanguage').innerHTML = '<option value="">Loading…</option>';
+  $('browseResults').innerHTML = '';
+  $('browseMeta').textContent = refresh ? 'Full rescan started in the background. Current results stay available meanwhile.' : '';
+  try {
+    const d = await api(`/api/browse/languages?user=${encodeURIComponent($('user').value)}&kind=${kind}${refresh ? '&refresh=1' : ''}`);
+    if (refresh) indexWasBusy = true;
+    const keep = $('browseLanguage').dataset.last;
+    $('browseLanguage').innerHTML = '<option value="">Choose a language…</option>' + d.languages.map(o => `<option value="${esc(o.code)}">${esc(o.name)} (${esc(o.code)}) · ${o.titles} titles</option>`).join('');
+    $('browseLanguage').disabled = !d.languages.length;
+    if (keep && d.languages.some(o => o.code === keep)) { $('browseLanguage').value = keep; loadBrowseResults(); }
+    if (!refresh) $('browseMeta').textContent = d.ready ? `${d.indexed} titles indexed${d.errors ? `, ${d.errors} could not be read` : ''}. Updated ${ago(d.built_at)}; changes are picked up in the background.` : 'The library index is still being built. This page refreshes itself as libraries finish.';
+    config.bazarr_configured = !!d.bazarr_configured;
+    $('bazarrPanel').classList.toggle('hidden', !config.bazarr_configured);
+    $('bazarrSearch').disabled = true;
+    await loadBazarrProfileOptions(d.bazarr_configured);
+    updateBrowseSortOptions();
+  } catch (e) {
+    $('browseLanguage').innerHTML = '<option value="">Unable to load</option>';
+    $('browseMeta').innerHTML = alertBox('err', esc(e.message));
+  }
+}
+
+async function loadBrowseResults() {
+  const language = $('browseLanguage').value;
+  $('browseLanguage').dataset.last = language;
+  if (!language) { $('browseResults').innerHTML = '<div class="empty">Choose a language to list matching titles.</div>'; $('browseCount').textContent = ''; return; }
+  const params = new URLSearchParams({ user: $('user').value, kind: $('browseKind').value, language, type: $('browseType').value, sort: $('browseSort').value, order: $('browseOrder').value });
+  $('browseResults').innerHTML = '<div class="empty">Finding matching titles…</div>';
+  try {
+    const d = await api(`/api/browse?${params}`);
+    let status = {};
+    if (config.bazarr_configured) { try { status = (await api(`/api/bazarr/status?user=${encodeURIComponent($('user').value)}`)).status || {}; } catch (_) {} }
+    const bazarr = config.bazarr_configured;
+    $('browseResults').innerHTML = table(
+      [{ text: 'Title' }, { text: 'Type' }, { text: 'Coverage' }, ...(bazarr ? [{ text: 'Bazarr' }] : [])],
+      d.results.map((it, n) => `<tr><td class="title"><button data-n="${n}">${esc(it.title)}</button> <small>${it.year ?? ''}</small></td><td>${typeBadge(it.type)}</td>` +
+        `<td>${meter(it.count, it.total, it.type === 'movie')}${it.type === 'show' ? ` <small>${it.percentage}%</small>` : ''}</td>` +
+        (bazarr ? `<td>${status[it.key] ? `<span class="badge ${status[it.key].state === 'missing' ? 'warn' : ''}">${esc(status[it.key].label)}</span>` : ''}</td>` : '') + '</tr>'),
+      'No matching movies or series.');
+    $('browseResults').querySelectorAll('button[data-n]').forEach(b => b.onclick = () => openTitle(d.results[b.dataset.n]));
+    $('browseCount').textContent = `${d.results.length} title(s)`;
+    $('bazarrSearch').disabled = !bazarr || $('browseKind').value !== 'audio' || !d.results.length;
+  } catch (e) { $('browseResults').innerHTML = alertBox('err', esc(e.message)); $('bazarrSearch').disabled = true; }
+}
+
+/* ---------- missing ---------- */
+$('missingKind').onchange = $('missingType').onchange = $('missingSort').onchange = () => loadMissing();
+const missingParams = () => new URLSearchParams({ user: $('user').value, language: config.focus_language, kind: $('missingKind').value, type: $('missingType').value, sort: $('missingSort').value });
+$('missingCsv').onclick = () => { window.location = `/api/missing?${missingParams()}&format=csv`; };
+$('missingBazarr').onclick = () => runBazarrSearch('missing-subtitles');
+$('arrSelectAll').onchange = () => { document.querySelectorAll('.arr-pick').forEach(x => x.checked = $('arrSelectAll').checked); updateArrButton(); };
+$('arrPreviewBtn').onclick = () => arrPreview();
+$('arrStart').onclick = () => arrStart();
+
+function updateArrButton() {
+  const n = document.querySelectorAll('.arr-pick:checked').length;
+  $('arrPreviewBtn').disabled = !n;
+  $('arrPreviewBtn').textContent = n ? `Preview request (${n})` : 'Preview request';
 }
 
 async function loadMissing() {
-  $('missingResults').innerHTML = '<li class="meta">Loading…</li>';
+  $('missingResults').innerHTML = '<div class="empty">Loading…</div>';
   $('arrPanel').classList.toggle('hidden', !config.arr_configured);
+  $('arrAllWrap').classList.toggle('hidden', !config.arr_configured);
   $('arrSelectAll').checked = false; updateArrButton();
   try {
     const d = await api(`/api/missing?${missingParams()}`);
-    $('missingResults').innerHTML = '';
-    if (!d.ready) {
-      $('missingMeta').textContent = 'The library index is still being built; results appear here as it fills in.';
-    } else {
-      $('missingMeta').textContent = `${d.results.length} title(s) missing ${config.focus_name} ${({either: 'audio or subtitles', both: 'audio and subtitles'})[d.kind] || d.kind}.`;
-    }
+    const arr = config.arr_configured, movie = (it) => it.type === 'movie';
+    $('missingMeta').textContent = d.ready ? `${d.results.length} title(s) missing ${config.focus_name}` : 'The library index is still being built; results appear as it fills in.';
     $('missingBazarr').disabled = !config.bazarr_configured || !d.results.length || d.kind === 'audio';
-    $('missingBazarr').title = config.bazarr_configured ? '' : 'Set BAZARR_URL and BAZARR_API_KEY to enable.';
-    for (const it of d.results) {
-      const li = document.createElement('li'); li.className = 'result-row';
-      const b = document.createElement('button');
-      b.innerHTML = `${esc(it.title)} <span class="meta">${it.year ?? ''} · ${it.type === 'show' ? 'Series' : 'Movie'}</span>`;
-      b.onclick = () => { showPage('search'); selectTitle(it); };
-      const fmt = (n) => it.type === 'movie' ? (n ? 'yes' : 'none') : (n === 0 ? 'none' : `${n}/${it.total}`);
-      const detail = document.createElement('span'); detail.className = 'coverage';
-      detail.textContent = `Audio ${fmt(it.audio)} · Subs ${fmt(it.subtitles)}`;
-      if (config.arr_configured) {
-        const pick = document.createElement('input'); pick.type = 'checkbox'; pick.className = 'arr-pick';
-        pick.value = it.key; pick.style.width = 'auto'; pick.onchange = updateArrButton;
-        li.prepend(pick);
-      }
-      li.append(b, detail); $('missingResults').appendChild(li);
-    }
-  } catch (e) { $('missingResults').innerHTML = `<li class="msg err">${esc(e.message)}</li>`; }
+    $('missingBazarr').classList.toggle('hidden', !config.bazarr_configured);
+    $('missingResults').innerHTML = table(
+      [...(arr ? [{ cls: 'pick' }] : []), { text: 'Title' }, { text: 'Type' }, { text: 'Audio' }, { text: 'Subtitles' }],
+      d.results.map((it, n) => `<tr>${arr ? `<td class="pick"><input type="checkbox" class="arr-pick" value="${esc(it.key)}"></td>` : ''}` +
+        `<td class="title"><button data-n="${n}">${esc(it.title)}</button> <small>${it.year ?? ''}</small></td><td>${typeBadge(it.type)}</td>` +
+        `<td>${meter(it.audio, it.total, movie(it))}</td><td>${meter(it.subtitles, it.total, movie(it))}</td></tr>`),
+      d.ready ? `Nothing is missing ${config.focus_name} in this selection.` : 'Waiting for the library index…');
+    $('missingResults').querySelectorAll('button[data-n]').forEach(b => b.onclick = () => openTitle(d.results[b.dataset.n]));
+    $('missingResults').querySelectorAll('.arr-pick').forEach(x => x.onchange = updateArrButton);
+  } catch (e) { $('missingResults').innerHTML = alertBox('err', esc(e.message)); }
 }
 
 async function loadLabelPlan() {
@@ -499,9 +559,7 @@ async function loadLabelPlan() {
   try {
     const p = await api('/api/labels/plan');
     const crit = { any: 'audio or subtitles', audio: 'audio', subtitles: 'subtitles' }[p.criteria];
-    $('labelSummary').textContent = `${p.qualifying} title(s) have ${config.focus_name} ${crit}; ${p.labelled} already carry the label. ` +
-      `${p.add.length} to add${p.remove_stale ? `, ${p.remove.length} to remove` : ''}. ` +
-      `In Plex, filter a library by Label → ${p.label} or build a smart collection on it. Labels are shared by all users.`;
+    $('labelSummary').textContent = `${p.qualifying} title(s) have ${config.focus_name} ${crit}; ${p.labelled} already carry the label (${p.add.length} to add${p.remove_stale ? `, ${p.remove.length} to remove` : ''}). In Plex, filter by Label → ${p.label} or build a smart collection on it. Labels are shared by all users.`;
     const rows = [...p.add.map(r => `+ ${r.title}`), ...(p.remove_stale ? p.remove.map(r => `− ${r.title}`) : [])];
     $('labelList').innerHTML = rows.map(r => `<li>${esc(r)}</li>`).join('');
     $('labelDetails').classList.toggle('hidden', !rows.length);
@@ -509,320 +567,285 @@ async function loadLabelPlan() {
     $('labelSync').textContent = rows.length ? `Update labels in Plex (${rows.length})` : 'Labels are up to date';
   } catch (e) { $('labelSummary').textContent = e.message; }
 }
-
-async function syncLabels() {
+$('labelSync').onclick = async () => {
   if (!confirm(`Update the "${config.labels.label}" label in Plex for the listed titles? Labels are visible to every user.`)) return;
   $('labelSync').disabled = true;
-  try { await api('/api/labels/sync', { method: 'POST' }); $('labelSummary').textContent = 'Labelling in the background…'; indexWasRunning = true; }
+  try { await api('/api/labels/sync', { method: 'POST' }); $('labelSummary').textContent = 'Labelling in the background…'; indexWasBusy = true; }
   catch (e) { $('labelSummary').textContent = e.message; }
+};
+
+/* ---------- Sonarr / Radarr / Seerr requests ---------- */
+async function arrPreview() {
+  const keys = [...document.querySelectorAll('.arr-pick:checked')].map(x => x.value);
+  if (!keys.length) return;
+  $('arrJob').innerHTML = alertBox('info', 'Checking Sonarr / Radarr / Seerr…');
+  $('arrPreview').classList.add('hidden');
+  try {
+    const kind = $('missingKind').value === 'subtitles' ? 'subtitles' : 'audio';
+    const d = await api('/api/arr/preview', JSON_POST({ user: $('user').value, keys, kind }));
+    window.arrPreviewData = d;
+    $('arrPreviewItems').innerHTML = d.rows.map(r => `<tr><td class="pick"><input type="checkbox" class="arr-run" value="${esc(r.key)}" ${r.service ? 'checked' : 'disabled'}></td>` +
+      `<td class="title"><strong>${esc(r.title)}</strong></td><td><span class="badge ${r.service ? 'info' : ''}">${esc(r.service || 'skip')}</span></td>` +
+      `<td>${esc(r.action)}${r.current_profile ? `<br><small>Profile ${esc(r.current_profile)}${r.profile_change ? ` → ${esc(r.target_profile)}` : ''}</small>` : ''}` +
+      (r.problems || []).map(p => `<br><small class="warn">${esc(p)}</small>`).join('') + '</td></tr>').join('');
+    $('arrPreview').classList.remove('hidden');
+    $('arrJob').innerHTML = alertBox('info', `${d.actionable} of ${d.rows.length} title(s) can be requested; ${d.profile_changes} profile change(s). Nothing has been sent yet.`);
+  } catch (e) { $('arrJob').innerHTML = alertBox('err', esc(e.message)); }
 }
-$('browseKind').onchange = () => loadBrowseLanguages(false);
-$('browseType').onchange = () => { updateBrowseSortOptions(); loadBrowseResults(); };
-$('browseLanguage').onchange = () => { syncBazarrMappingSelection(); loadBrowseResults(); };
-$('browseSort').onchange = () => loadBrowseResults();
-$('browseOrder').onchange = () => loadBrowseResults();
-$('refreshBrowse').onclick = () => loadBrowseLanguages(true);
+
+async function arrStart() {
+  const d = window.arrPreviewData; if (!d) return;
+  const keys = [...document.querySelectorAll('.arr-run:checked')].map(x => x.value);
+  if (!keys.length) return;
+  const change = $('arrChangeProfiles').checked;
+  if (!confirm(`Send ${keys.length} request(s)?${change && d.profile_changes ? ' Quality profiles will change in Sonarr/Radarr for the listed titles.' : ''} Downloads may start and existing files may be replaced.`)) return;
+  $('arrStart').disabled = true;
+  try {
+    const job = await api('/api/arr/jobs', JSON_POST({ preview_id: d.preview_id, keys, change_profiles: change }));
+    for (let i = 0; i < 600; i++) {
+      const j = await api(`/api/arr/jobs/${job.job_id}`);
+      $('arrJob').innerHTML = alertBox(j.status === 'completed' ? (j.failed ? 'warn' : 'ok') : 'info',
+        `<strong>Requests ${esc(j.status)}: ${j.completed}/${j.total}</strong>` + (j.results.length ?
+          `<ul>${j.results.map(r => `<li>${esc(r.title)}: ${r.status === 'success' ? esc(r.detail) : `<span class="err">${esc(r.error)}</span>`}</li>`).join('')}</ul>` : ''));
+      if (j.status === 'completed') break;
+      await sleep(1500);
+    }
+  } catch (e) { $('arrJob').innerHTML = alertBox('err', esc(e.message)); }
+  $('arrStart').disabled = false;
+}
+
+/* ---------- Sonarr / Radarr page: setup check, optimiser, backups ---------- */
+$('setupRefresh').onclick = () => loadSetup(true);
+
+async function loadSetup(force) {
+  $('setupBody').textContent = 'Reading Sonarr / Radarr / Seerr settings…';
+  try {
+    const d = await api(`/api/arr/config${force ? '?refresh=1' : ''}`);
+    const out = [];
+    const buttons = [];
+    for (const name of ['sonarr', 'radarr']) {
+      const r = d[name], title = name[0].toUpperCase() + name.slice(1);
+      if (!r.configured) continue;
+      if (r.error) { out.push(`<div class="sub-card"><h3>${title}</h3>${alertBox('err', esc(r.error))}</div>`); continue; }
+      buttons.push(`<button class="btn primary" data-opt="${name}" type="button">Preview ${title} changes</button>`);
+      const rows = r.profiles.map(p => `<tr><td class="title"><strong>${esc(p.name)}</strong></td><td class="num">${p.italian_score}</td>` +
+        `<td>${p.ready ? '<span class="badge ok">Ready</span>' : '<span class="badge warn">Needs work</span>'}` +
+        (p.problems.length ? `<br>${p.problems.map(x => `<small class="warn">${esc(x)}</small>`).join('<br>')}` : '') + '</td></tr>');
+      out.push(`<div class="sub-card"><div class="row"><h3 style="margin:0">${title} ${esc(r.version)}</h3><span class="badge">${r.managed} titles</span><span class="spacer"></span>` +
+        `<small>Used for Italian requests: ${r.target_profile ? `<strong>${esc(r.target_profile.name)}</strong>` : '<span class="warn">none</span>'}</small></div>` +
+        r.warnings.map(w => alertBox('warn', esc(w))).join('') +
+        `<div style="margin-top:10px">${table([{ text: 'Profile' }, { text: 'Italian score', cls: 'num' }, { text: 'Status' }], rows, 'No profiles.')}</div></div>`);
+    }
+    const s = d.seerr;
+    if (s.configured) out.push(`<div class="sub-card"><div class="row"><h3 style="margin:0">Seerr ${esc(s.version || '')}</h3></div>` +
+      (s.error ? alertBox('err', esc(s.error)) : `<p class="muted" style="margin:6px 0 0">Sonarr servers: ${s.sonarr_servers.map(x => esc(x.name)).join(', ') || 'none'} · Radarr servers: ${s.radarr_servers.map(x => esc(x.name)).join(', ') || 'none'} · Request mode: ${esc(d.mode)}</p>`) + '</div>');
+    $('setupBody').innerHTML = out.join('') || '<div class="empty">Nothing configured.</div>';
+    $('optimizeButtons').innerHTML = buttons.join('');
+    $('optimizeCard').classList.toggle('hidden', !buttons.length);
+    document.querySelectorAll('[data-opt]').forEach(b => b.onclick = () => optimizePreview(b.dataset.opt));
+  } catch (e) { $('setupBody').innerHTML = alertBox('err', esc(e.message)); }
+}
+
+const scoreInputs = () => ({ ita: +$('scoreIta').value, eng: +$('scoreEng').value, jpn: +$('scoreJpn').value, multi: +$('scoreMulti').value });
+
+function describeChange(c) {
+  if (c.type === 'score') return `${c.new_format ? '<span class="badge info">new</span> ' : ''}Score <strong>${esc(c.format)}</strong>: ${c.from} <span class="arrow">→</span> ${c.to}`;
+  if (c.type === 'cutoff') return `Raise upgrade cut-off score: ${c.from} <span class="arrow">→</span> ${c.to}`;
+  if (c.type === 'upgrade') return 'Turn upgrades on';
+  if (c.type === 'language') return `Profile language: ${esc(c.from)} <span class="arrow">→</span> ${esc(c.to)}`;
+  return esc(JSON.stringify(c));
+}
+
+async function optimizePreview(service) {
+  const box = $('optimizeResult');
+  box.innerHTML = alertBox('info', 'Reading profiles…');
+  try {
+    const d = await api('/api/arr/optimize/preview', JSON_POST({ service, scores: scoreInputs() }));
+    const changed = d.profiles.filter(p => p.changed);
+    const title = service[0].toUpperCase() + service.slice(1);
+    box.innerHTML = `<div class="stack" style="margin-top:14px"><h3>${title}: proposed changes</h3>` +
+      (d.new_formats.length ? `<p class="muted">Custom formats that will be created: ${d.new_formats.map(f => `<strong>${esc(f.name)}</strong>`).join(', ')}</p>` : '<p class="muted">All needed custom formats already exist.</p>') +
+      d.warnings.map(w => alertBox('warn', esc(w))).join('') +
+      (changed.length ? d.profiles.map(p => `<div class="sub-card"><label class="check"><input type="checkbox" class="opt-profile" value="${p.id}" ${p.changed ? 'checked' : 'disabled'}> <strong>${esc(p.name)}</strong> ` +
+        `${p.changed ? `<span class="badge warn">${p.changes.length} change(s)</span>` : '<span class="badge ok">Already optimal</span>'}</label>` +
+        p.changes.map(c => `<div class="change">${describeChange(c)}</div>`).join('') + '</div>').join('') : alertBox('ok', 'Every profile already matches. Nothing to change.')) +
+      (changed.length ? `<label class="check"><input type="checkbox" id="optConfirm"> I've reviewed these changes. Apply them to my live ${title} profiles.</label>` +
+        `<div class="row"><button class="btn primary" id="optApply" type="button" disabled>Back up and apply</button></div>` : '') + '</div>';
+    if (changed.length) {
+      $('optConfirm').onchange = () => { $('optApply').disabled = !$('optConfirm').checked; };
+      $('optApply').onclick = () => optimizeApply(d.preview_id, title);
+    }
+  } catch (e) { box.innerHTML = alertBox('err', esc(e.message)); }
+}
+
+async function optimizeApply(previewId, title) {
+  const ids = [...document.querySelectorAll('.opt-profile:checked')].map(x => +x.value);
+  if (!ids.length) { $('optimizeResult').insertAdjacentHTML('beforeend', alertBox('warn', 'Tick at least one profile.')); return; }
+  if (!confirm(`Change ${ids.length} ${title} profile(s)? A backup is saved first and can be restored below.`)) return;
+  $('optApply').disabled = true;
+  try {
+    const r = await api('/api/arr/optimize/apply', JSON_POST({ preview_id: previewId, profile_ids: ids, confirm: true }));
+    $('optimizeResult').innerHTML = alertBox('ok', `<strong>Applied to ${r.profiles.map(p => esc(p.name)).join(', ')}.</strong>` +
+      (r.created_formats.length ? `<br>Created custom formats: ${r.created_formats.map(esc).join(', ')}` : '') + `<br>Backup saved as <code>${esc(r.backup_id)}</code>.`);
+    loadBackups(); loadSetup(true);
+  } catch (e) { $('optimizeResult').insertAdjacentHTML('beforeend', alertBox('err', esc(e.message))); $('optApply').disabled = false; loadBackups(); }
+}
+
+async function loadBackups() {
+  try {
+    const { backups } = await api('/api/arr/optimize/backups');
+    $('backupList').innerHTML = table([{ text: 'Backup' }, { text: 'Service' }, { text: 'Profiles' }, { text: 'Created formats' }, { text: '' }],
+      backups.map(b => `<tr><td><code>${esc(b.id)}</code><br><small>${b.created_at ? new Date(b.created_at * 1000).toLocaleString() : ''}</small></td><td>${esc(b.service)}</td>` +
+        `<td>${b.profiles.map(esc).join(', ')}</td><td><small>${b.created_formats.map(esc).join(', ') || '—'}</small></td>` +
+        `<td class="num">${b.restored_at ? '<span class="badge">Restored</span>' : `<button class="btn sm danger" data-restore="${esc(b.id)}" type="button">Restore</button>`}</td></tr>`),
+      'No backups yet. One is created automatically before any change.');
+    document.querySelectorAll('[data-restore]').forEach(btn => btn.onclick = async () => {
+      if (!confirm('Restore the original profiles and remove the custom formats this tool created for that change?')) return;
+      btn.disabled = true;
+      try {
+        const r = await api('/api/arr/optimize/restore', JSON_POST({ backup_id: btn.dataset.restore, confirm: true }));
+        $('optimizeResult').innerHTML = alertBox('ok', `Restored ${r.restored_profiles.map(esc).join(', ')}.` + (r.removed_formats.length ? ` Removed ${r.removed_formats.map(esc).join(', ')}.` : ''));
+        loadBackups(); loadSetup(true);
+      } catch (e) { $('optimizeResult').innerHTML = alertBox('err', esc(e.message)); btn.disabled = false; }
+    });
+  } catch (e) { $('backupList').innerHTML = alertBox('err', esc(e.message)); }
+}
+
+/* ---------- Bazarr ---------- */
+let bazarrProfiles = [], bazarrMappings = {};
 $('bazarrSearch').onclick = () => runBazarrSearch('audio');
 $('bazarrSelectAll').onchange = () => document.querySelectorAll('.bazarr-select-item').forEach(x => x.checked = $('bazarrSelectAll').checked);
 $('bazarrStartSelected').onclick = () => startSelectedBazarrJob();
 $('bazarrCancelJob').onclick = () => cancelBazarrJob();
 $('bazarrRetryJob').onclick = () => retryBazarrJob();
 $('bazarrHistory').onclick = () => loadBazarrHistory();
-$('saveBazarrMapping').onclick = () => saveBazarrMapping();
-$('removeBazarrMapping').onclick = () => removeBazarrMapping();
-
-let bazarrProfiles = [];
-let bazarrMappings = {};
+$('saveBazarrMapping').onclick = () => saveBazarrMapping(false);
+$('removeBazarrMapping').onclick = () => saveBazarrMapping(true);
 
 async function loadBazarrProfileOptions(configured) {
   $('bazarrProfileMap').classList.add('hidden');
   if (!configured || $('browseKind').value !== 'audio') return;
   try {
     const d = await api('/api/bazarr/profiles');
-    bazarrProfiles = d.profiles || [];
-    bazarrMappings = d.mappings || {};
-    $('bazarrProfile').innerHTML = "<option value=''>Keep each title's existing profile</option>" +
-      bazarrProfiles.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+    bazarrProfiles = d.profiles || []; bazarrMappings = d.mappings || {};
+    $('bazarrProfile').innerHTML = "<option value=''>Keep each title's existing profile</option>" + bazarrProfiles.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
     $('bazarrProfileMap').classList.remove('hidden');
-    $('bazarrMappingStatus').textContent = `Mappings saved on server: ${d.storage_path}. Mount /data to persistent Unraid appdata to retain them across container replacement.`;
+    $('bazarrMappingStatus').textContent = `Mappings are saved in ${d.storage_path}. Keep /data on persistent storage.`;
     syncBazarrMappingSelection();
-  } catch (e) {
-    $('bazarrHint').textContent = `Bazarr profile list could not be loaded: ${e.message}`;
-  }
+  } catch (e) { $('bazarrHint').textContent = `Bazarr profile list could not be loaded: ${e.message}`; }
 }
 
 function syncBazarrMappingSelection() {
   const code = $('browseLanguage').value;
   if (!code || !bazarrProfiles.length) return;
-  const mappedId = bazarrMappings[code] || '';
-  if (mappedId && ![...$('bazarrProfile').options].some(o => o.value === mappedId)) {
-    const stale = document.createElement('option');
-    stale.value = mappedId;
-    stale.textContent = `Unavailable Bazarr profile (ID ${mappedId}) — remove or replace mapping`;
-    $('bazarrProfile').appendChild(stale);
-  }
-  $('bazarrProfile').value = mappedId;
+  const id = bazarrMappings[code] || '';
+  if (id && ![...$('bazarrProfile').options].some(o => o.value === id)) $('bazarrProfile').add(new Option(`Unavailable profile (ID ${id}), remove or replace`, id));
+  $('bazarrProfile').value = id;
   loadBazarrSuggestions(code);
 }
 
 async function loadBazarrSuggestions(code) {
-  const box = $('bazarrSuggestion');
-  box.classList.add('hidden');
-  if (!code || $('bazarrProfileMap').classList.contains('hidden')) return;
+  const box = $('bazarrSuggestion'); box.classList.add('hidden');
   try {
     const d = await api(`/api/bazarr/profile-suggestions?language=${encodeURIComponent(code)}`);
-    box.innerHTML = `<strong>Profile suggestions for ${esc(d.language_name)}</strong><p class="meta">${esc(d.note)}</p>`;
     const matches = (d.suggestions || []).filter(x => x.contains_language);
-    if (!matches.length) {
-      box.innerHTML += '<p class="meta">No profile explicitly contains this language. Review profiles in Bazarr or choose one manually.</p>';
-    }
-    for (const item of matches) {
-      const row = document.createElement('div'); row.className = 'suggestion';
-      const label = document.createElement('span'); label.textContent = `${item.name} — ${item.reason}`;
-      const button = document.createElement('button'); button.type = 'button'; button.textContent = 'Use';
-      button.onclick = () => { $('bazarrProfile').value = item.id; };
-      row.append(label, button); box.appendChild(row);
-    }
+    box.innerHTML = `<small>${esc(d.note)}</small>` + (matches.length ? matches.map(m => `<div class="row" style="margin-top:6px"><span>${esc(m.name)} <small>${esc(m.reason)}</small></span><span class="spacer"></span><button class="btn sm" data-use="${esc(m.id)}" type="button">Use</button></div>`).join('') : `<p class="muted" style="margin-top:6px">No profile explicitly contains this language.</p>`);
+    box.querySelectorAll('[data-use]').forEach(b => b.onclick = () => { $('bazarrProfile').value = b.dataset.use; });
     box.classList.remove('hidden');
-  } catch (e) {
-    box.textContent = `Could not inspect profile contents: ${e.message}`;
-    box.classList.remove('hidden');
-  }
+  } catch (e) { box.textContent = `Could not inspect profiles: ${e.message}`; box.classList.remove('hidden'); }
 }
 
-async function saveBazarrMapping() {
-  const code = $('browseLanguage').value;
-  if (!code) return;
-  const next = { ...bazarrMappings };
-  const profile = $('bazarrProfile').value;
-  if (profile) next[code] = profile; else delete next[code];
+async function saveBazarrMapping(remove) {
+  const code = $('browseLanguage').value; if (!code) return;
+  const next = { ...bazarrMappings }, profile = $('bazarrProfile').value;
+  if (profile && !remove) next[code] = profile; else delete next[code];
   try {
-    const d = await api('/api/bazarr/profile-mappings', {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mappings: next })
-    });
+    const d = await api('/api/bazarr/profile-mappings', JSON_POST({ mappings: next }, 'PUT'));
     bazarrMappings = d.mappings || next;
-    $('bazarrMappingStatus').textContent = `Saved mapping for ${code}. It will apply to Bazarr media when you run the search.`;
+    if (remove) $('bazarrProfile').value = '';
+    $('bazarrMappingStatus').textContent = remove ? `Removed mapping for ${code}.` : `Saved mapping for ${code}. It applies when you run the search.`;
   } catch (e) { $('bazarrMappingStatus').textContent = e.message; }
 }
 
-async function removeBazarrMapping() {
-  const code = $('browseLanguage').value;
-  if (!code) return;
-  const next = { ...bazarrMappings };
-  delete next[code];
-  try {
-    const d = await api('/api/bazarr/profile-mappings', {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mappings: next })
-    });
-    bazarrMappings = d.mappings || next;
-    $('bazarrProfile').value = '';
-    $('bazarrMappingStatus').textContent = `Removed mapping for ${code}. Existing per-title Bazarr profiles will be retained.`;
-  } catch (e) { $('bazarrMappingStatus').textContent = e.message; }
-}
-
-function updateBrowseSortOptions() {
-  const isShows = $('browseType').value === 'show';
-  const currentSort = $('browseSort').value;
-  $('browseSort').innerHTML = '<option value="title">Title</option>' + (isShows
-    ? '<option value="episodes">Total episode count</option><option value="percentage">Language coverage (%)</option>'
-    : '');
-  if ([...$('browseSort').options].some(o => o.value === currentSort)) $('browseSort').value = currentSort;
-  else $('browseSort').value = 'title';
-}
-
-async function loadBrowseLanguages(refresh) {
-  const user = $('user').value;
-  const kind = $('browseKind').value;
-  $('browseLanguage').disabled = true;
-  $('browseLanguage').innerHTML = '<option value="">Indexing library…</option>';
-  $('browseResults').innerHTML = '';
-  $('browseMeta').textContent = refresh
-    ? 'Full rescan started in the background. Current results stay available meanwhile.'
-    : 'Loading…';
-  try {
-    const d = await api(`/api/browse/languages?user=${encodeURIComponent(user)}&kind=${kind}${refresh ? '&refresh=1' : ''}`);
-    if (refresh) indexWasRunning = true;
-    $('browseLanguage').innerHTML = '<option value="">Choose a language…</option>' +
-      d.languages.map(o => `<option value="${esc(o.code)}">${esc(o.name)} (${esc(o.code)}) · ${o.titles} titles</option>`).join('');
-    $('browseLanguage').disabled = !d.languages.length;
-    $('browseMeta').textContent = d.ready
-      ? `${d.indexed} titles indexed${d.errors ? `; ${d.errors} item(s) could not be read` : ''}. Updated ${ago(d.built_at)}; changes are picked up in the background.`
-      : 'The library index is still being built. This page refreshes itself as libraries finish.';
-    window.bazarrConfigured = !!d.bazarr_configured;
-    $('bazarrSearch').disabled = !d.bazarr_configured || kind !== 'audio' || !d.languages.length || !$('browseLanguage').value;
-    $('bazarrHint').textContent = !d.bazarr_configured
-      ? 'Bazarr integration is not configured. Set BAZARR_URL and BAZARR_API_KEY in the container.'
-      : 'Searches titles matching the selected Plex audio language. A saved mapping can assign a Bazarr subtitle profile before searching; this changes the Bazarr profile globally for that media item and may download subtitles.';
-    await loadBazarrProfileOptions(d.bazarr_configured);
-    updateBrowseSortOptions();
-    if (!d.languages.length) $('browseMeta').textContent += ' No language streams were found.';
-  } catch (e) {
-    $('browseLanguage').innerHTML = '<option value="">Unable to load languages</option>';
-    $('browseMeta').textContent = e.message;
-    $('bazarrSearch').disabled = true;
-  }
-}
-
-async function loadBrowseResults() {
-  const language = $('browseLanguage').value;
-  if (!language) { $('browseResults').innerHTML = ''; return; }
-  const params = new URLSearchParams({ user: $('user').value, kind: $('browseKind').value,
-    language, type: $('browseType').value, sort: $('browseSort').value,
-    order: $('browseOrder').value });
-  $('browseResults').innerHTML = '<li class="meta">Finding matching titles…</li>';
-  try {
-    const d = await api(`/api/browse?${params}`);
-    $('browseResults').innerHTML = '';
-    if (!d.results.length) {
-      $('browseResults').innerHTML = '<li class="meta">No matching movies or series.</li>';
-      return;
-    }
-    let bazarrStatus = {};
-    if (window.bazarrConfigured) {
-      try {
-        const statusData = await api(`/api/bazarr/status?user=${encodeURIComponent($('user').value)}`);
-        bazarrStatus = statusData.status || {};
-      } catch (_) { /* Status is supplementary; keep the Plex browse results usable. */ }
-    }
-    for (const it of d.results) {
-      const li = document.createElement('li');
-      li.className = 'result-row';
-      const b = document.createElement('button');
-      b.innerHTML = `${esc(it.title)} <span class="meta">${it.year ?? ''} · ${it.type === 'show' ? 'Series' : 'Movie'}</span>`;
-      b.onclick = () => { showPage('search'); selectTitle(it); };
-      const detail = document.createElement('span'); detail.className = 'coverage';
-      detail.textContent = it.type === 'show'
-        ? `${it.count}/${it.total} episodes · ${it.percentage}%`
-        : 'Available';
-      const status = bazarrStatus[it.key];
-      if (status) detail.textContent += ` · Bazarr: ${status.label}`;
-      li.append(b, detail);
-      $('browseResults').appendChild(li);
-    }
-    $('browseMeta').textContent = `${d.results.length} matching title(s) found.`;
-    $('bazarrSearch').disabled = $('browseKind').value !== 'audio' || d.results.length === 0 || $('bazarrHint').textContent.startsWith('Bazarr integration is not configured');
-  } catch (e) {
-    $('browseResults').innerHTML = `<li class="msg err">${esc(e.message)}</li>`;
-    $('bazarrSearch').disabled = true;
-  }
-}
-
-async function runBazarrSearch(selection = 'audio') {
+async function runBazarrSearch(selection) {
   const missingMode = selection === 'missing-subtitles';
   const language = missingMode ? config.focus_language : $('browseLanguage').value;
   const mediaType = missingMode ? $('missingType').value : $('browseType').value;
-  if (!language || (!missingMode && $('browseKind').value !== 'audio')) return;
-  $('bazarrSearch').disabled = true;
+  if (!language) return;
   $('bazarrPreview').classList.add('hidden');
-  $('bazarrResult').textContent = 'Preparing a read-only preview from Plex and Bazarr…';
+  $('bazarrResult').innerHTML = alertBox('info', 'Preparing a read-only preview from Plex and Bazarr…');
+  $('bazarrPanel').scrollIntoView({ block: 'nearest' });
   try {
-    const d = await api('/api/browse/bazarr-preview', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user: $('user').value, language, type: mediaType, selection })
-    });
+    const d = await api('/api/browse/bazarr-preview', JSON_POST({ user: $('user').value, language, type: mediaType, selection }));
     window.currentBazarrPreview = d;
-    $('bazarrPreviewSummary').textContent = `${d.selected_count} Plex title(s) ${missingMode ? `are missing ${config.focus_name} subtitles` : 'matched the audio language'}; ${d.matched_count} matched uniquely in Bazarr; ${d.unmatched.length} could not be matched. ${d.profile_changes} global profile assignment(s) would change.`;
-    $('bazarrPreviewItems').innerHTML = '';
-    for (const item of d.candidates) {
-      const row = document.createElement('div'); row.className = 'bulk-item';
-      const check = document.createElement('input'); check.type = 'checkbox'; check.className = 'bazarr-select-item'; check.value = item.key; check.checked = true;
-      const text = document.createElement('div');
-      const currentProfile = item.current_profile_name || 'Unknown / unset';
-      const targetProfile = item.target_profile_name || 'Keep current';
-      const subStatus = item.subtitle_status?.missing?.length
-        ? `Missing (${item.subtitle_status.missing_items || 0} wanted item(s)): ${item.subtitle_status.missing.map(x => `${x} (${item.subtitle_status.missing_counts?.[x] || 0})`).join(', ')}`
-        : (item.subtitle_status?.label || 'Subtitle status unavailable');
-      text.innerHTML = `<strong>${esc(item.title)} (${esc(item.type)})</strong><small>Bazarr profile: ${esc(currentProfile)} → ${esc(targetProfile)}${item.profile_changed ? ' · WILL CHANGE' : ''}</small><small>${esc(subStatus)}</small>`;
-      row.append(check, text); $('bazarrPreviewItems').appendChild(row);
-    }
-    if (d.unmatched.length) {
-      const details = document.createElement('details');
-      const summary = document.createElement('summary'); summary.textContent = `${d.unmatched.length} title(s) not matched in Bazarr`;
-      const list = document.createElement('ul');
-      d.unmatched.forEach(x => { const li = document.createElement('li'); li.textContent = `${x.title}: ${x.reason}`; list.appendChild(li); });
-      details.append(summary, list); $('bazarrPreviewItems').appendChild(details);
-    }
+    $('bazarrPreviewSummary').textContent = `${d.selected_count} title(s) ${missingMode ? `are missing ${config.focus_name} subtitles` : 'matched the audio language'}; ${d.matched_count} matched in Bazarr, ${d.unmatched.length} did not. ${d.profile_changes} profile change(s).`;
+    $('bazarrPreviewItems').innerHTML = d.candidates.map(item => {
+      const st = item.subtitle_status || {};
+      const sub = st.missing?.length ? `Missing (${st.missing_items || 0}): ${st.missing.map(x => `${x} (${st.missing_counts?.[x] || 0})`).join(', ')}` : (st.label || '');
+      return `<tr><td class="pick"><input type="checkbox" class="bazarr-select-item" value="${esc(item.key)}" checked></td><td><strong>${esc(item.title)}</strong> ${typeBadge(item.type)}<br>` +
+        `<small>Profile ${esc(item.current_profile_name || 'unset')} → ${esc(item.target_profile_name || 'keep current')}${item.profile_changed ? ' <span class="badge warn">will change</span>' : ''}</small><br><small>${esc(sub)}</small></td></tr>`;
+    }).join('') + (d.unmatched.length ? `<tr><td></td><td><details><summary>${d.unmatched.length} not matched in Bazarr</summary><ul>${d.unmatched.map(x => `<li>${esc(x.title)}: ${esc(x.reason)}</li>`).join('')}</ul></details></td></tr>` : '');
     $('bazarrPreview').classList.remove('hidden');
     $('bazarrSelectAll').checked = true;
-    $('bazarrResult').textContent = 'Preview only: no Bazarr changes or searches have been made yet.';
+    $('bazarrResult').innerHTML = alertBox('info', 'Preview only. No changes or searches have been made yet.');
     $('bazarrStartSelected').disabled = !d.candidates.length;
-  } catch (e) { showError($('bazarrResult'), e); }
-  $('bazarrSearch').disabled = false;
+  } catch (e) { $('bazarrResult').innerHTML = alertBox('err', esc(e.message)); }
 }
 
 async function startSelectedBazarrJob() {
-  const preview = window.currentBazarrPreview;
-  if (!preview) return;
+  const preview = window.currentBazarrPreview; if (!preview) return;
   const selected = [...document.querySelectorAll('.bazarr-select-item:checked')].map(x => x.value);
-  if (!selected.length) { $('bazarrJobText').textContent = 'Select at least one title.'; return; }
-  const hasProfileChanges = preview.candidates.some(x => selected.includes(x.key) && x.profile_changed);
-  const warning = hasProfileChanges
-    ? 'This will globally change one or more Bazarr profiles for all Plex users, then trigger subtitle searches. Bazarr may download subtitles.'
-    : 'This will trigger Bazarr subtitle searches. Bazarr may download subtitles.';
-  if (!confirm(`Start background processing for ${selected.length} selected title(s)?\n\n${warning}`)) return;
+  if (!selected.length) { $('bazarrResult').innerHTML = alertBox('warn', 'Select at least one title.'); return; }
+  const changes = preview.candidates.some(x => selected.includes(x.key) && x.profile_changed);
+  if (!confirm(`Start background processing for ${selected.length} title(s)?\n\n${changes ? 'This will change Bazarr profiles globally, then trigger subtitle searches.' : 'This will trigger Bazarr subtitle searches.'} Bazarr may download subtitles.`)) return;
   $('bazarrStartSelected').disabled = true;
   try {
-    const started = await api('/api/browse/bazarr-jobs', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ preview_id: preview.preview_id, selected_keys: selected })
-    });
+    const started = await api('/api/browse/bazarr-jobs', JSON_POST({ preview_id: preview.preview_id, selected_keys: selected }));
     window.currentBazarrJobId = started.job_id;
-    $('bazarrJobText').textContent = `Job ${started.job_id} queued for ${started.total} title(s)…`;
+    $('bazarrJob').classList.remove('hidden');
+    $('bazarrJobText').textContent = `Job queued for ${started.total} title(s)…`;
     $('bazarrJobDetails').innerHTML = ''; $('bazarrCancelJob').classList.remove('hidden'); $('bazarrRetryJob').classList.add('hidden');
     await pollBazarrJob(started.job_id);
-  } catch (e) { showError($('bazarrJob'), e); $('bazarrStartSelected').disabled = false; }
+  } catch (e) { $('bazarrResult').innerHTML = alertBox('err', esc(e.message)); $('bazarrStartSelected').disabled = false; }
 }
 
 async function pollBazarrJob(jobId) {
-  for (let attempt = 0; attempt < 360; attempt++) {
+  for (let i = 0; i < 360; i++) {
     try {
       const job = await api(`/api/bazarr/jobs/${encodeURIComponent(jobId)}`);
-      $('bazarrJobText').textContent = `Bazarr job ${job.status}: ${job.completed || 0}/${job.total || 0} completed; ${job.succeeded || 0} successful; ${job.failed || 0} failed.`;
-      if (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled') {
-        if (job.results?.length) {
-          const details = document.createElement('details'); const summary = document.createElement('summary');
-          summary.textContent = 'View per-title job results'; const list = document.createElement('ul');
-          job.results.forEach(r => { const li = document.createElement('li'); li.textContent = `${r.title}: ${r.status}${r.error ? ' — ' + r.error : ''}`; list.appendChild(li); });
-          details.append(summary, list); $('bazarrJobDetails').innerHTML = ''; $('bazarrJobDetails').appendChild(details);
-        }
+      $('bazarrJobText').textContent = `Job ${job.status}: ${job.completed || 0}/${job.total || 0} done, ${job.succeeded || 0} succeeded, ${job.failed || 0} failed.`;
+      if (['completed', 'failed', 'cancelled'].includes(job.status)) {
+        if (job.results?.length) $('bazarrJobDetails').innerHTML = `<details><summary>Per-title results</summary><ul>${job.results.map(r => `<li>${esc(r.title)}: ${esc(r.status)}${r.error ? ' — ' + esc(r.error) : ''}</li>`).join('')}</ul></details>`;
         $('bazarrStartSelected').disabled = false; $('bazarrCancelJob').classList.add('hidden');
         if ((job.failed || 0) > 0 || job.status === 'cancelled') $('bazarrRetryJob').classList.remove('hidden');
         return;
       }
     } catch (e) { $('bazarrJobText').textContent = `Could not read job status: ${e.message}`; break; }
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    await sleep(2000);
   }
   $('bazarrStartSelected').disabled = false; $('bazarrCancelJob').classList.add('hidden');
 }
 
 async function cancelBazarrJob() {
   if (!window.currentBazarrJobId) return;
-  try { await api(`/api/bazarr/jobs/${encodeURIComponent(window.currentBazarrJobId)}/cancel`, { method: 'POST' }); $('bazarrJobText').textContent += ' Cancellation requested…'; }
+  try { await api(`/api/bazarr/jobs/${encodeURIComponent(window.currentBazarrJobId)}/cancel`, { method: 'POST' }); $('bazarrJobText').textContent += ' Cancelling…'; }
   catch (e) { $('bazarrJobText').textContent = e.message; }
 }
 
 async function loadBazarrHistory() {
   try {
     const d = await api('/api/bazarr/jobs/history');
-    const details = document.createElement('details'); details.open = true;
-    const summary = document.createElement('summary'); summary.textContent = `Recent Bazarr job events (${d.events.length})`;
-    const list = document.createElement('ul');
-    d.events.slice().reverse().forEach(event => {
-      const li = document.createElement('li');
-      li.textContent = `${new Date(event.timestamp * 1000).toLocaleString()} · ${event.event} · ${event.title || event.job_id}${event.error ? ' · ' + event.error : ''}`;
-      list.appendChild(li);
-    });
-    details.append(summary, list); $('bazarrJobDetails').innerHTML = ''; $('bazarrJobDetails').appendChild(details);
-  } catch (e) { $('bazarrJobText').textContent = `Could not load job history: ${e.message}`; }
+    $('bazarrJob').classList.remove('hidden');
+    $('bazarrJobDetails').innerHTML = `<details open><summary>Recent job events (${d.events.length})</summary><ul>${d.events.slice().reverse().map(e => `<li>${new Date(e.timestamp * 1000).toLocaleString()} · ${esc(e.event)} · ${esc(e.title || e.job_id)}${e.error ? ' · ' + esc(e.error) : ''}</li>`).join('')}</ul></details>`;
+  } catch (e) { $('bazarrResult').innerHTML = alertBox('err', esc(e.message)); }
 }
 
 async function retryBazarrJob() {
   if (!window.currentBazarrJobId) return;
   try {
     const d = await api(`/api/bazarr/jobs/${encodeURIComponent(window.currentBazarrJobId)}/retry`, { method: 'POST' });
-    window.currentBazarrJobId = d.job_id; $('bazarrJobText').textContent = `Retry job ${d.job_id} queued for ${d.total} failed title(s)…`;
+    window.currentBazarrJobId = d.job_id;
+    $('bazarrJobText').textContent = `Retry queued for ${d.total} title(s)…`;
     $('bazarrJobDetails').innerHTML = ''; $('bazarrRetryJob').classList.add('hidden'); $('bazarrCancelJob').classList.remove('hidden');
     await pollBazarrJob(d.job_id);
   } catch (e) { $('bazarrJobText').textContent = e.message; }
