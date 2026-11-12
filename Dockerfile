@@ -5,16 +5,23 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     HOST=0.0.0.0 \
-    PORT=8080
+    PORT=8080 \
+    PLEXLANG_DATA_DIR=/data \
+    HOME=/tmp \
+    PUID=99 \
+    PGID=100
 
 WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY plexlang ./plexlang
-RUN pip install . && useradd --system --uid 10001 plexlang
+RUN pip install . && mkdir -p /data
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
-USER plexlang
+# Library index, Bazarr mappings and job history live here. Map it to appdata.
+VOLUME /data
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
   CMD python -c "import os,urllib.request; urllib.request.urlopen(f'http://127.0.0.1:{os.environ.get(\"PORT\",\"8080\")}/healthz', timeout=4)"
 
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["plexlang", "web"]

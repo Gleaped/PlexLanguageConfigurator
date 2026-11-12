@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import os
 import re
 import json
@@ -12,49 +14,26 @@ from concurrent.futures import ThreadPoolExecutor
 from importlib import resources
 
 import requests
-from flask import Flask, jsonify, request
+from flask import Flask, Response, jsonify, request
 from plexapi.exceptions import Unauthorized
 
 from . import core, plex_client
 from .bazarr_client import BazarrClient, BazarrError
 from .profile_mappings import ProfileMappingStore
 from .bazarr_profiles import suggest_profiles
+from .index import LibraryIndex, coverage, language_aliases, visible_keys
+from .labels import LabelSync, _env_bool
 
 CACHE_SECONDS = 300
-BROWSE_CACHE_SECONDS = 86400
+VISIBILITY_SECONDS = 1800  # how long a Home user's visible-title list is reused
+FOCUS_NAMES = {"ita": "Italian", "eng": "English", "spa": "Spanish", "fra": "French",
+               "deu": "German", "por": "Portuguese", "nld": "Dutch", "jpn": "Japanese"}
 
 
 def _label(item) -> str:
     if getattr(item, "type", None) == "episode":
         return f"S{item.parentIndex:02}E{item.index:02} {item.title}"
     return item.title
-
-
-def _plex_external_ids(title) -> dict[str, list[str]]:
-    """Extract stable IMDb/TVDB/TMDB identifiers from Plex GUID metadata."""
-    import re
-
-    values = []
-    for attr in ("guid", "guids"):
-        raw = getattr(title, attr, None)
-        if callable(raw):
-            try:
-                raw = raw()
-            except Exception:
-                raw = None
-        if raw:
-            values.extend(raw if isinstance(raw, (list, tuple, set)) else [raw])
-    found = {"imdb": [], "tvdb": [], "tmdb": []}
-    for value in values:
-        text = str(getattr(value, "id", value) or "").strip()
-        match = re.search(r"(?:^|[/:.])((?:imdb|tvdb|tmdb))://?([^/?#]+)", text, re.I)
-        if not match:
-            match = re.search(r"(imdb|tvdb|tmdb)[:/]+([^/?#]+)", text, re.I)
-        if match:
-            kind, identifier = match.group(1).lower(), match.group(2)
-            if identifier not in found[kind]:
-                found[kind].append(identifier)
-    return found
 
 
 def _normal_title(value) -> str:
@@ -82,6 +61,34 @@ def _record_bazarr_job_event(session, job_id: str, event: str, **details):
         pass
 
 
+def _bazarr_lookup(rows, media):
+    """Index Bazarr series/movies by external ID and by (title, year)."""
+    id_pairs = (("imdbId", "imdb"), ("tvdbId", "tvdb")) if media == "show" else (("imdbId", "imdb"), ("tmdbId", "tmdb"))
+    id_field = "sonarrSeriesId" if media == "show" else "radarrId"
+    by_id, by_title = {}, {}
+    for row in rows:
+        if not row.get(id_field):
+            continue
+        for field, kind in id_pairs:
+            if row.get(field):
+                by_id.setdefault((kind, str(row.get(field)).strip().lower()), row)
+        by_title.setdefault((_normal_title(row.get("title")), str(row.get("year") or "")), []).append(row)
+    return {"ids": by_id, "titles": by_title}
+
+
+def _wanted_lookup(rows, media):
+    """{bazarr id: {language: missing count}} from Bazarr's wanted list."""
+    id_keys = (("radarrId", "radarrid", "movieId", "movie_id") if media == "movie"
+               else ("sonarrSeriesId", "seriesId", "seriesid", "sonarr_series_id"))
+    out: dict[str, dict[str, int]] = {}
+    for row in rows:
+        lang = str(row.get("language") or row.get("languageName") or row.get("code2") or "Unknown language")
+        for row_id in {str(row.get(key)) for key in id_keys if row.get(key) not in (None, "")}:
+            counts = out.setdefault(row_id, {})
+            counts[lang] = counts.get(lang, 0) + 1
+    return out
+
+
 def _options(options):
     return [{"code": o.code, "name": o.name, "count": o.count, "total": o.total,
              "label": o.label()} for o in options]
@@ -92,8 +99,15 @@ class PlexSession:
 
     def __init__(self, url: str, token: str, connect=plex_client.connect,
                  bazarr: BazarrClient | None = None,
-                 profile_mappings: ProfileMappingStore | None = None):
+                 profile_mappings: ProfileMappingStore | None = None,
+                 index: LibraryIndex | None = None):
         self.url, self.token, self._connect = url, token, connect
+        self.focus_language = os.environ.get("FOCUS_LANGUAGE", "ita").strip().lower() or "ita"
+        self.auto_label = _env_bool("AUTO_LABEL", False)
+        self.index = index or LibraryIndex(self.admin, after_refresh=self._after_index_refresh)
+        self.labels = LabelSync(self.admin, self.index, language=self.focus_language)
+        self._visible: dict[str, tuple[float, set | None]] = {}
+        self._visible_refreshing: set[str] = set()
         self.bazarr = bazarr
         self.profile_mappings = profile_mappings or ProfileMappingStore()
         self._admin = None
@@ -116,6 +130,39 @@ class PlexSession:
             self._admin = self._connect(self.url, self.token)
         return self._admin
 
+    def start_background(self):
+        """Serve the saved index right away and keep it fresh in the background."""
+        self.index.start()
+
+    def _after_index_refresh(self):
+        if self.auto_label:
+            self.labels.sync()
+
+    def visible(self, user: str) -> set | None:
+        """Rating keys this Home user can see (None = everything, for the admin).
+
+        Served from cache; a stale entry is returned at once and refreshed in
+        the background, so only a user's very first visit waits on Plex.
+        """
+        hit = self._visible.get(user)
+        if hit and time.time() - hit[0] < VISIBILITY_SECONDS:
+            return hit[1]
+        if hit:
+            if user not in self._visible_refreshing:
+                self._visible_refreshing.add(user)
+                threading.Thread(target=self._load_visible, args=(user,), daemon=True).start()
+            return hit[1]
+        return self._load_visible(user)
+
+    def _load_visible(self, user: str):
+        try:
+            plex = self.user_server(user)
+            keys = None if plex is self.admin() else visible_keys(plex)
+            self._visible[user] = (time.time(), keys)
+            return keys
+        finally:
+            self._visible_refreshing.discard(user)
+
     def user_server(self, name: str):
         with self._lock:
             if name not in self._users:
@@ -135,59 +182,16 @@ class PlexSession:
         return title, items
 
     def browse_index(self, user: str, refresh: bool = False) -> dict:
-        """Build/cache a per-user index of languages present in every movie/show."""
-        hit = self._browse.get(user)
-        if hit and not refresh and time.time() - hit[0] < BROWSE_CACHE_SECONDS:
-            return hit[1]
-
-        # Prevent simultaneous first-page requests from scanning the same library.
-        with self._browse_lock:
-            hit = self._browse.get(user)
-            if hit and not refresh and time.time() - hit[0] < BROWSE_CACHE_SECONDS:
-                return hit[1]
-
-            plex = self.user_server(user)
-            titles = []
-            seen = set()
-            errors = 0
-            for section in plex.library.sections():
-                if getattr(section, "type", None) not in ("movie", "show"):
-                    continue
-                for title in section.all():
-                    key = str(getattr(title, "ratingKey", ""))
-                    if not key or key in seen:
-                        continue
-                    seen.add(key)
-                    try:
-                        playable = plex_client.playable_items(plex, title)
-                        summary = core.summarize(playable)
-                        titles.append({
-                            "key": key,
-                            "title": title.title,
-                            "year": getattr(title, "year", None),
-                            "type": title.type,
-                            "ids": _plex_external_ids(title),
-                            "total": summary.total,
-                            "audio": [
-                                {"code": o.code, "name": o.name, "count": o.count,
-                                 "total": o.total} for o in summary.audio
-                            ],
-                            "subtitles": [
-                                {"code": o.code, "name": o.name, "count": o.count,
-                                 "total": o.total} for o in summary.subtitles
-                            ],
-                        })
-                    except Exception:
-                        # One unavailable item must not prevent browsing the rest.
-                        errors += 1
-
-            built_at = int(time.time())
-            index = {"titles": titles, "scanned": len(seen), "indexed": len(titles),
-                     "errors": errors, "built_at": built_at,
-                     "expires_at": built_at + BROWSE_CACHE_SECONDS,
-                     "cache_seconds": BROWSE_CACHE_SECONDS}
-            self._browse[user] = (time.time(), index)
-            return index
+        """The library index as this user sees it. Never waits for a rescan."""
+        if refresh:
+            self.index.request_refresh(full=True)
+        allowed = self.visible(user)
+        titles = [t for t in self.index.titles() if allowed is None or t["key"] in allowed]
+        info = self.index.info()
+        return {"titles": titles, "scanned": len(titles), "indexed": len(titles),
+                "errors": info["errors"], "built_at": info["built_at"],
+                "expires_at": info["next_refresh_at"], "cache_seconds": info["refresh_seconds"],
+                "ready": info["ready"], "index": info}
 
 
 def create_app(session: PlexSession | None = None) -> Flask:
@@ -200,6 +204,7 @@ def create_app(session: PlexSession | None = None) -> Flask:
         bazarr_key = os.environ.get("BAZARR_API_KEY")
         bazarr = BazarrClient(bazarr_url, bazarr_key) if bazarr_url and bazarr_key else None
         session = PlexSession(url, token, bazarr=bazarr)
+        session.start_background()
     app.config["plex"] = session
 
     @app.errorhandler(LookupError)
@@ -265,6 +270,7 @@ def create_app(session: PlexSession | None = None) -> Flask:
                        indexed=index["indexed"], errors=index["errors"],
                        built_at=index["built_at"], expires_at=index["expires_at"],
                        cache_seconds=index["cache_seconds"],
+                       ready=index.get("ready", True), index=index.get("index"),
                        bazarr_configured=session.bazarr is not None)
 
     @app.get("/api/browse")
@@ -312,7 +318,8 @@ def create_app(session: PlexSession | None = None) -> Flask:
         return jsonify(results=results, scanned=index["scanned"],
                        indexed=index["indexed"], errors=index["errors"],
                        built_at=index["built_at"], expires_at=index["expires_at"],
-                       cache_seconds=index["cache_seconds"])
+                       cache_seconds=index["cache_seconds"],
+                       ready=index.get("ready", True), index=index.get("index"))
 
     @app.get("/api/bazarr/profiles")
     def bazarr_profiles():
@@ -388,46 +395,33 @@ def create_app(session: PlexSession | None = None) -> Flask:
             data = {"series": series, "movies": movies,
                     "wanted_movies": wanted_movies, "wanted_episodes": wanted_episodes,
                     "profiles": profiles, "profile_names": profile_names,
-                    "language_names": language_names, "language_aliases": language_aliases}
+                    "language_names": language_names, "language_aliases": language_aliases,
+                    "lookup": {"show": _bazarr_lookup(series, "show"),
+                               "movie": _bazarr_lookup(movies, "movie")},
+                    "wanted": {"show": _wanted_lookup(wanted_episodes, "show"),
+                               "movie": _wanted_lookup(wanted_movies, "movie")}}
             session._bazarr_status_cache = (time.time(), data)
             return data
 
     def _match_bazarr_title(title, context):
-        media = title["type"]
-        rows = context["series"] if media == "show" else context["movies"]
-        id_pairs = (("imdbId", "imdb"), ("tvdbId", "tvdb")) if media == "show" else (("imdbId", "imdb"), ("tmdbId", "tmdb"))
-        id_field = "sonarrSeriesId" if media == "show" else "radarrId"
+        """Match by external ID first, then by a unique exact title + year."""
+        lookup = context["lookup"]["show" if title["type"] == "show" else "movie"]
         ids = title.get("ids") or {}
-        wanted_ids = {str(value).strip().lower() for _, key in id_pairs
-                      for value in ids.get(key, []) if value}
-        for row in rows:
-            row_ids = {str(row.get(field)).strip().lower() for field, _ in id_pairs if row.get(field)}
-            if wanted_ids.intersection(row_ids) and row.get(id_field):
-                return row
-        exact = [row for row in rows
-                 if _normal_title(row.get("title")) == _normal_title(title.get("title"))
-                 and str(row.get("year") or "") == str(title.get("year") or "")
-                 and row.get(id_field)]
-        return exact[0] if len(exact) == 1 else None
+        for kind in ("imdb", "tvdb", "tmdb"):
+            for value in ids.get(kind, []):
+                row = lookup["ids"].get((kind, str(value).strip().lower()))
+                if row:
+                    return row
+        rows = lookup["titles"].get((_normal_title(title.get("title")), str(title.get("year") or "")), [])
+        return rows[0] if len(rows) == 1 else None
 
     def _wanted_status(title, context, bazarr_row):
         """Conservative status: missing is explicit; absence is reported as unknown."""
         if not bazarr_row:
             return {"state": "unmatched", "label": "Not in Bazarr", "missing": []}
-        if title["type"] == "movie":
-            bazarr_id = str(bazarr_row.get("radarrId") or "")
-            rows = context["wanted_movies"]
-            id_keys = ("radarrId", "radarrid", "movieId", "movie_id")
-        else:
-            bazarr_id = str(bazarr_row.get("sonarrSeriesId") or "")
-            rows = context["wanted_episodes"]
-            id_keys = ("sonarrSeriesId", "seriesId", "seriesid", "sonarr_series_id")
-        missing_counts = {}
-        for row in rows:
-            row_ids = {str(row.get(key)) for key in id_keys if row.get(key) not in (None, "")}
-            if bazarr_id and bazarr_id in row_ids:
-                lang = str(row.get("language") or row.get("languageName") or row.get("code2") or "Unknown language")
-                missing_counts[lang] = missing_counts.get(lang, 0) + 1
+        media = "movie" if title["type"] == "movie" else "show"
+        bazarr_id = str(bazarr_row.get("radarrId" if media == "movie" else "sonarrSeriesId") or "")
+        missing_counts = dict(context["wanted"][media].get(bazarr_id, {}))
         if missing_counts:
             missing = sorted(missing_counts)
             return {"state": "missing", "label": "Missing wanted subtitles", "missing": missing,
@@ -436,11 +430,18 @@ def create_app(session: PlexSession | None = None) -> Flask:
                 "missing_counts": {}, "missing_items": 0,
                 "note": "Bazarr wanted-list has no missing entries; this is not a full on-disk verification."}
 
-    def _build_bazarr_preview(user, language, media_type):
+    def _build_bazarr_preview(user, language, media_type, selection="audio"):
         index = session.browse_index(user)
-        selected = [title for title in index["titles"]
-                    if (media_type == "all" or title["type"] == media_type)
-                    and any(o["code"].lower() == language for o in title["audio"])]
+        if selection == "missing-subtitles":
+            # Titles where some or all items lack subtitles in this language.
+            aliases = language_aliases(language)
+            selected = [title for title in index["titles"]
+                        if (media_type == "all" or title["type"] == media_type)
+                        and title["total"] and coverage(title, "subtitles", aliases) < title["total"]]
+        else:
+            selected = [title for title in index["titles"]
+                        if (media_type == "all" or title["type"] == media_type)
+                        and any(o["code"].lower() == language for o in title["audio"])]
         context = _bazarr_context()
         mappings = session.profile_mappings.load()
         mapped_profile = mappings.get(language)
@@ -510,12 +511,15 @@ def create_app(session: PlexSession | None = None) -> Flask:
         user = str(body.get("user") or "").strip()
         language = str(body.get("language") or "").strip().lower()
         media_type = body.get("type", "all")
+        selection = body.get("selection", "audio")
         if not user or not language:
             return jsonify(error="user and audio language are required."), 400
         if media_type not in ("all", "movie", "show"):
             return jsonify(error="type must be all, movie or show."), 400
+        if selection not in ("audio", "missing-subtitles"):
+            return jsonify(error="selection must be audio or missing-subtitles."), 400
         try:
-            plan = _build_bazarr_preview(user, language, media_type)
+            plan = _build_bazarr_preview(user, language, media_type, selection)
         except (BazarrError, ValueError) as exc:
             return jsonify(error=str(exc)), 502
         preview_id = uuid.uuid4().hex
@@ -681,6 +685,91 @@ def create_app(session: PlexSession | None = None) -> Flask:
     def bazarr_search_legacy():
         return jsonify(error="This endpoint has been replaced by preview + selective background jobs.",
                        replacement="POST /api/browse/bazarr-preview then POST /api/browse/bazarr-jobs"), 410
+
+    @app.get("/api/config")
+    def config():
+        code = session.focus_language
+        return jsonify(focus_language=code, focus_name=FOCUS_NAMES.get(code, code),
+                       bazarr_configured=session.bazarr is not None,
+                       auto_label=session.auto_label, labels=session.labels.config())
+
+    @app.get("/api/index/status")
+    def index_status():
+        return jsonify(index=session.index.info(), labels=session.labels.status)
+
+    @app.post("/api/index/refresh")
+    def index_refresh():
+        full = (request.get_json(silent=True) or {}).get("full", True)
+        session.index.request_refresh(full=bool(full))
+        return jsonify(queued=True, full=bool(full)), 202
+
+    def _missing(user, language, kind, media_type):
+        aliases = language_aliases(language)
+        index = session.browse_index(user)
+        rows = []
+        for title in index["titles"]:
+            total = title["total"]
+            if not total or (media_type != "all" and title["type"] != media_type):
+                continue
+            audio = coverage(title, "audio", aliases)
+            subs = coverage(title, "subtitles", aliases)
+            lacking = {"audio": audio < total, "subtitles": subs < total,
+                       "either": audio < total or subs < total,
+                       "both": audio < total and subs < total}[kind]
+            if not lacking:
+                continue
+            rows.append({"key": title["key"], "title": title["title"], "year": title["year"],
+                         "type": title["type"], "total": total,
+                         "audio": audio, "subtitles": subs,
+                         "audio_missing": total - audio, "subtitles_missing": total - subs,
+                         "ids": title.get("ids") or {}})
+        return rows, index
+
+    @app.get("/api/missing")
+    def missing():
+        """Shows/movies lacking a language entirely or in some episodes."""
+        user = request.args["user"]
+        language = (request.args.get("language") or session.focus_language).strip().lower()
+        kind = request.args.get("kind", "either")
+        media_type = request.args.get("type", "all")
+        if kind not in ("audio", "subtitles", "either", "both"):
+            return jsonify(error="kind must be audio, subtitles, either or both"), 400
+        if media_type not in ("all", "movie", "show"):
+            return jsonify(error="type must be 'all', 'movie' or 'show'"), 400
+        rows, index = _missing(user, language, kind, media_type)
+        sort = request.args.get("sort", "missing")
+        if sort == "title":
+            rows.sort(key=lambda r: (str(r["title"]).casefold(), r["year"] or 0))
+        else:
+            rows.sort(key=lambda r: (-(r["audio_missing"] + r["subtitles_missing"]),
+                                     str(r["title"]).casefold()))
+        if request.args.get("format") == "csv":
+            buf = io.StringIO()
+            writer = csv.writer(buf)
+            writer.writerow(["title", "year", "type", "items", f"{language}_audio", f"{language}_subtitles",
+                             "imdb", "tvdb", "tmdb", "plex_key"])
+            for r in rows:
+                writer.writerow([r["title"], r["year"] or "", r["type"], r["total"], r["audio"],
+                                 r["subtitles"], ",".join(r["ids"].get("imdb", [])),
+                                 ",".join(r["ids"].get("tvdb", [])), ",".join(r["ids"].get("tmdb", [])),
+                                 r["key"]])
+            return Response(buf.getvalue(), mimetype="text/csv", headers={
+                "Content-Disposition": f'attachment; filename="missing-{language}.csv"'})
+        return jsonify(results=rows, language=language, kind=kind,
+                       ready=index["ready"], built_at=index["built_at"], index=index["index"])
+
+    @app.get("/api/labels/plan")
+    def labels_plan():
+        if not session.index.ready:
+            return jsonify(error="The library index is still being built."), 409
+        return jsonify(session.labels.plan())
+
+    @app.post("/api/labels/sync")
+    def labels_sync():
+        if not session.index.ready:
+            return jsonify(error="The library index is still being built."), 409
+        session.labels.sync_in_background()
+        return jsonify(queued=True), 202
 
     @app.get("/api/languages")
     def languages():

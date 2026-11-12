@@ -11,7 +11,7 @@ The web interface now has a **Browse by language** page alongside Search & confi
 - Selecting a result opens the existing language configuration panel for that title and user.
 - **Refresh library index** rebuilds the index after library or media changes.
 
-The browse index is generated per Plex Home user and cached in memory for 10 minutes. It inspects media streams, not just title metadata, so the results reflect languages actually present in the files. The initial scan can take time for large libraries, particularly TV libraries with many episodes. Items that cannot be inspected are skipped and included in the error count; they do not abort the entire scan.
+The browse page reads the shared library index (see the README's *First start*), filtered to what the selected Home user can see. It inspects media streams, not just title metadata, so results reflect languages actually present in the files. Items that cannot be read are skipped and counted as errors.
 
 ## API
 
@@ -27,13 +27,9 @@ The browse index is generated per Plex Home user and cached in memory for 10 min
 
 The existing title search now queries each accessible movie/TV library section separately instead of issuing the global `/library/all` search request. This avoids the global endpoint and its `includeGuids` parameter combination that produced HTTP 500 in the reported setup.
 
-## 24-hour cache and sorting
+## Index and sorting
 
-The per-user browse index is cached in process memory for **24 hours**. Use
-**Force refresh index** to rebuild it immediately. A refresh rescans the
-selected user's accessible movie and TV sections and replaces the previous
-cached index. The cache is per Plex Home user; restarting the container also
-clears it.
+The index is built in the background, saved to `/data/library-index.json`, and refreshed incrementally (see the README). **Full rescan** re-reads everything in the background while current results stay available.
 
 The results can be sorted by title in either direction. When **Series only**
 is selected, additional sorts are available:

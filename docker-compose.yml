@@ -7,6 +7,14 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
+    volumes:
+      - ./data:/data                           # library index + settings survive restarts
     environment:
       PLEX_URL: "http://192.168.1.10:32400"   # your Plex server, as seen from this container
       PLEX_TOKEN: "change-me"                  # admin Plex token
+      FOCUS_LANGUAGE: "ita"                    # language for the "Missing" page and the label
+      LANGUAGE_LABEL: "Italian"                # Plex label for titles with that language
+      AUTO_LABEL: "false"                      # true = keep labels in sync after every refresh
+      REFRESH_MINUTES: "30"                    # how often to check Plex for changes
+      # BAZARR_URL: "http://192.168.1.10:6767"
+      # BAZARR_API_KEY: "change-me"
