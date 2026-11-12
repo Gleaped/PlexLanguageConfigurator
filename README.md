@@ -67,6 +67,24 @@ Open `http://<host>:8080`:
 
 The **Missing Italian** tab lists every series and movie the selected user can see that has no Italian, or has it in only some episodes (for example `Audio 12/40 · Subs none`). You can filter by audio, subtitles, either or both, and by movies or series. **Download CSV** exports the list with IMDb/TVDB/TMDB IDs, which you can use in Sonarr or Radarr. If Bazarr is configured, **Search Bazarr for missing subtitles** previews and runs a subtitle search for exactly those titles. The language is set by `FOCUS_LANGUAGE` (default `ita`).
 
+### Get an Italian version (Sonarr, Radarr, Seerr)
+
+When Sonarr, Radarr and/or Seerr are configured, the Missing Italian list gets checkboxes. Tick titles and press **Preview request**. For each title you'll see what will happen and anything in your setup that would stop it from working:
+
+- **Series in Sonarr:** optionally switch to your Italian quality profile, then search **only the episodes Plex says lack Italian** (matched by season and episode number).
+- **Movies in Radarr:** optionally switch profile, then search the movie.
+- **Not in Sonarr/Radarr:** request it in Seerr, using the TMDB ID from Plex. Seerr refuses to re-request something it already has, so Seerr is mainly useful for titles Sonarr/Radarr don't manage, or for sending requests to a separate Italian Sonarr/Radarr server in Seerr (set `SEERR_SONARR_SERVER` / `SEERR_RADARR_SERVER`). `ARR_REQUEST_VIA=seerr` sends everything through Seerr.
+
+Nothing is sent until you press **Start requests**. The app never edits your profiles or custom formats. It only reads them. **Setup check** shows, for each profile, whether a search will actually prefer an Italian release and replace your current file.
+
+**How to set up Sonarr v4 / Radarr so this works.** Language is chosen by custom formats:
+
+1. Create a custom format **Italian** with a *Language* condition set to *Italian*.
+2. Create a custom format **MULTi ITA** with a *Release Title* condition like `\b(MULTi|ITA)\b`, and add *Language: Italian* as a required condition. MULTi on its own also matches French + English releases.
+3. In the profile you want (or a copy, for example *HD - Italian*), score **MULTi ITA** highest (for example 200) and **Italian** lower (for example 100). That way a release with both Italian and the original audio wins over an Italian-only one, which would replace your original-language track.
+4. Keep **Upgrades allowed** on, and set **Upgrade until custom format score** at least as high as the MULTi score. In Radarr, set the profile language to *Any*, not *Original* or English.
+5. Set `SONARR_ITALIAN_PROFILE` / `RADARR_ITALIAN_PROFILE` to that profile's name, or leave them empty and the best Italian-ready profile is picked.
+
 ### Italian label in Plex
 
 The same tab shows how many titles have Italian and how many already carry the `Italian` label. **Update labels in Plex** adds the label to the ones that are missing it. Set `AUTO_LABEL=true` to have this happen after every refresh instead.
@@ -93,6 +111,13 @@ When an episode has more than one track in the chosen language, the tool prefers
 | `PLEX_CONCURRENCY` | no | `4` | Parallel Plex requests while indexing |
 | `PLEX_BATCH_SIZE` | no | `100` | Items read per Plex request |
 | `BAZARR_URL`, `BAZARR_API_KEY` | no | | Optional Bazarr integration |
+| `SONARR_URL`, `SONARR_API_KEY` | no | | Optional, for requesting Italian episodes |
+| `RADARR_URL`, `RADARR_API_KEY` | no | | Optional, for requesting Italian movies |
+| `SEERR_URL`, `SEERR_API_KEY` | no | | Optional Overseerr/Jellyseerr |
+| `SONARR_ITALIAN_PROFILE`, `RADARR_ITALIAN_PROFILE` | no | best Italian-ready | Quality profile (name or id) titles are switched to before searching |
+| `SEERR_SONARR_SERVER`, `SEERR_RADARR_SERVER` | no | Seerr default | Seerr server (name or id) to send Italian requests to |
+| `SEERR_SONARR_PROFILE`, `SEERR_RADARR_PROFILE` | no | server default | Profile on that Seerr server |
+| `ARR_REQUEST_VIA` | no | `auto` | `auto`, `arr` or `seerr` |
 | `PUID`, `PGID` | no | `99`, `100` | Owner of files in `/data` (Unraid's nobody:users) |
 
 ## Troubleshooting

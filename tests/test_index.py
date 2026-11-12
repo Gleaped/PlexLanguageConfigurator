@@ -214,3 +214,18 @@ def test_playable_items_reads_episodes_in_batches():
     items = plex_client.playable_items(plex, title)
     assert [int(i.ratingKey) for i in items] == list(range(250))
     assert sorted(plex.batches) == [50, 100, 100]
+
+
+def test_episodes_missing_uses_season_episode_numbers(fake):
+    plex, index = fake
+    original = plex._video
+
+    def numbered(key, detail):
+        xml = original(key, detail)
+        if key.startswith("e"):
+            xml = xml.replace("<Video ", f'<Video parentIndex="1" index="{key[1]}" ', 1)
+        return xml
+    plex._video = numbered
+    index.refresh()
+    assert index.episodes_missing("s1", "ita", "audio") == [(1, 2), (1, 3)]
+    assert index.episodes_missing("s1", "it", "subtitles") == [(1, 3)]
