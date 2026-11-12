@@ -84,16 +84,21 @@ def resolve_title(plex: PlexServer, query: str):
     )
 
 
-def playable_items(plex: PlexServer, title, workers: int = 8) -> list:
+def playable_items(plex: PlexServer, title, workers: int = 4, batch_size: int = 100) -> list:
     """All episodes of a show (or the movie itself), with their streams loaded.
 
-    Library listings don't include audio/subtitle streams, so each item is
-    fetched in full. This runs in parallel because big shows have hundreds of
-    episodes.
+    Library listings don't include audio/subtitle streams, so items are read in
+    full. They're read in batches (``/library/metadata/1,2,3``) rather than one
+    request per episode, a few batches in parallel.
     """
     if title.type in ("show", "season"):
-        keys = [ep.ratingKey for ep in title.episodes()]
+        keys = [int(ep.ratingKey) for ep in title.episodes()]
     else:
-        keys = [title.ratingKey]
+        keys = [int(title.ratingKey)]
+    batches = [keys[i:i + batch_size] for i in range(0, len(keys), batch_size)]
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        return list(pool.map(plex.fetchItem, keys))
+        loaded = {}
+        for items in pool.map(plex.fetchItems, batches):
+            loaded.update({int(i.ratingKey): i for i in items})
+    # Fall back to a single read for anything the batch didn't return.
+    return [loaded.get(k) or plex.fetchItem(k) for k in keys]

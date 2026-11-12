@@ -19,13 +19,32 @@ It runs as a Docker container with a small web UI.
    - **Repository:** `ghcr.io/gleaped/plexlanguageconfigurator:latest`
    - **Network Type:** `Bridge`
    - **WebUI:** `http://[IP]:[PORT:8080]/`
-3. Click **Add another Path, Port, Variable, Label or Device** three times:
+3. Click **Add another Path, Port, Variable, Label or Device** for each of these:
    - **Port:** Container Port `8080`, Host Port `8080` (or any free port).
+   - **Path:** Container Path `/data`, Host Path `/mnt/user/appdata/plexlang`. This keeps the library index, so restarts and updates don't rescan.
    - **Variable:** Key `PLEX_URL`, Value `http://<your-unraid-ip>:32400`.
    - **Variable:** Key `PLEX_TOKEN`, Value your token, with Mask set to *Yes*.
+   - Optional: `BAZARR_URL` and `BAZARR_API_KEY`, and any setting from the table below.
 4. Click **Apply**, then open the container's **WebUI**.
 
-Alternatively, save [`unraid/plexlang.xml`](unraid/plexlang.xml) to `/boot/config/plugins/dockerMan/templates-user/my-PlexLanguageConfigurator.xml` on your flash drive, then pick it from the **Template** dropdown in **Add Container** and fill in the two Plex fields.
+The easier way is the template, which has every setting already filled in. From the Unraid terminal:
+
+```bash
+wget -O /boot/config/plugins/dockerMan/templates-user/my-PlexLanguageConfigurator.xml \
+  https://raw.githubusercontent.com/Gleaped/PlexLanguageConfigurator/main/unraid/plexlang.xml
+```
+
+Then in **Docker → Add Container** pick *PlexLanguageConfigurator* from the **Template** dropdown, fill in the Plex URL and token, and click **Apply**.
+
+**Updating an existing container:** after the new image is published, click the container icon → **Force update**. If you set the container up by hand earlier, add the `/data` path above (Edit → Add another Path) so the index is kept between updates.
+
+### First start
+
+The container starts serving right away. In the background it builds a language index of your whole library and saves it to `/data`. The status line at the top of the page shows progress. Reads are batched (about 100 items per Plex request, 4 in parallel), so even large libraries usually finish within minutes. After that:
+
+- Pages read from the saved index and never wait on Plex.
+- Every 30 minutes (`REFRESH_MINUTES`) it lists the library and re-reads only items that changed or were added.
+- Once a week (`FULL_RESCAN_HOURS`) it re-reads everything, to catch changes Plex doesn't flag, such as a new external subtitle file. **Full rescan** on the Browse page starts one now.
 
 ## Install with Docker Compose
 
@@ -44,6 +63,16 @@ Open `http://<host>:8080`:
 3. Choose the audio and subtitle language (or *Off*, or *Don't change*). Languages that aren't in every episode show a count, like `Italiano (38/42)`.
 4. **Preview** shows how many episodes match and lists the ones that don't. **Apply** saves the choice for that user. Episodes without the language are left as they are.
 
+### Missing Italian
+
+The **Missing Italian** tab lists every series and movie the selected user can see that has no Italian, or has it in only some episodes (for example `Audio 12/40 · Subs none`). You can filter by audio, subtitles, either or both, and by movies or series. **Download CSV** exports the list with IMDb/TVDB/TMDB IDs, which you can use in Sonarr or Radarr. If Bazarr is configured, **Search Bazarr for missing subtitles** previews and runs a subtitle search for exactly those titles. The language is set by `FOCUS_LANGUAGE` (default `ita`).
+
+### Italian label in Plex
+
+The same tab shows how many titles have Italian and how many already carry the `Italian` label. **Update labels in Plex** adds the label to the ones that are missing it. Set `AUTO_LABEL=true` to have this happen after every refresh instead.
+
+The label goes on the series or movie, not on each episode, and the same single label is used everywhere. Plex indexes labels, so filtering a library by **Label → Italian** or building a smart collection on it is fast. Only titles whose label needs to change are touched. Labels are server-wide, so every user sees them. Plex can also use labels to restrict what managed users see, so pick a label name you don't already use for that.
+
 When an episode has more than one track in the chosen language, the tool prefers main audio over commentary tracks, and full subtitles over forced ones.
 
 ## Configuration
@@ -53,6 +82,18 @@ When an episode has more than one track in the chosen language, the tool prefers
 | `PLEX_URL` | yes | | Plex server address as reachable from the container |
 | `PLEX_TOKEN` | yes | | Server owner's Plex token |
 | `PORT` | no | `8080` | Port the web UI listens on inside the container |
+| `FOCUS_LANGUAGE` | no | `ita` | Language for the Missing page and the label |
+| `LANGUAGE_LABEL` | no | `Italian` | Plex label for titles with that language |
+| `AUTO_LABEL` | no | `false` | `true` keeps labels in sync after every refresh |
+| `LABEL_CRITERIA` | no | `any` | `any`, `audio` or `subtitles`: which streams count |
+| `LABEL_MIN_COVERAGE` | no | `0` | Minimum % of a series' episodes that need the language (0 = any episode) |
+| `LABEL_REMOVE_STALE` | no | `false` | `true` also removes the label from titles that no longer have the language |
+| `REFRESH_MINUTES` | no | `30` | How often to check Plex for changes |
+| `FULL_RESCAN_HOURS` | no | `168` | How often to re-read everything |
+| `PLEX_CONCURRENCY` | no | `4` | Parallel Plex requests while indexing |
+| `PLEX_BATCH_SIZE` | no | `100` | Items read per Plex request |
+| `BAZARR_URL`, `BAZARR_API_KEY` | no | | Optional Bazarr integration |
+| `PUID`, `PGID` | no | `99`, `100` | Owner of files in `/data` (Unraid's nobody:users) |
 
 ## Troubleshooting
 

@@ -58,6 +58,10 @@
   .bulk-item small { display:block; color:var(--muted); }
   .status-pill { display:inline-block; border:1px solid var(--line); border-radius:20px; padding:2px 8px; font-size:11px; margin-left:6px; }
   .suggestion { display:flex; justify-content:space-between; gap:10px; align-items:center; padding:6px 0; }
+  .index-status { font-size:13px; color:var(--muted); margin:-12px 0 16px; }
+  .index-status .bar { height:4px; background:var(--line); border-radius:2px; margin-top:4px; overflow:hidden; }
+  .index-status .bar span { display:block; height:100%; background:var(--accent); }
+  .tabs { flex-wrap:wrap; }
   @media (max-width:520px) { .browse-controls { grid-template-columns:1fr; } }
 </style>
 </head>
@@ -65,6 +69,7 @@
 <main>
   <h1>Plex Language Configurator</h1>
   <p class="sub">Set audio and subtitle language for a whole series or movie, for one user.</p>
+  <div id="indexStatus" class="index-status">Checking library index…</div>
 
   <section>
     <h2>1. User</h2>
@@ -74,6 +79,7 @@
   <nav class="tabs" aria-label="Pages">
     <button id="searchTab" type="button" aria-selected="true">Search & configure</button>
     <button id="browseTab" type="button" aria-selected="false">Browse by language</button>
+    <button id="missingTab" type="button" aria-selected="false">Missing Italian</button>
   </nav>
 
   <section id="searchSection">
@@ -110,10 +116,10 @@
         <select id="browseOrder"><option value="asc">Ascending</option><option value="desc">Descending</option></select>
       </div>
       <div style="align-self:end">
-        <button id="refreshBrowse" type="button">Force refresh index</button>
+        <button id="refreshBrowse" type="button">Full rescan</button>
       </div>
     </div>
-    <div id="browseMeta" class="browse-meta">Open this page to index the selected user's library. The first scan can take a while.</div>
+    <div id="browseMeta" class="browse-meta"></div>
     <div class="actions">
       <button id="bazarrSearch" type="button" disabled>Search missing subtitles in Bazarr</button>
     </div>
@@ -128,6 +134,47 @@
       <p id="bazarrMappingStatus" class="meta">Mappings are saved on the configurator server. Mount /data to persistent Unraid appdata to retain them across container replacement.</p>
     </div>
     <div id="bazarrSuggestion" class="profile-map hidden"></div>
+    <ul class="results" id="browseResults"></ul>
+  </section>
+
+  <section id="missingSection" class="hidden">
+    <h2 id="missingHeading">Missing Italian</h2>
+    <p class="meta" id="missingIntro">Series and movies without Italian, or with it in only some episodes. Select one to configure it.</p>
+    <div class="browse-controls">
+      <div>
+        <label for="missingKind">Missing</label>
+        <select id="missingKind">
+          <option value="either">Audio or subtitles</option>
+          <option value="audio">Audio</option>
+          <option value="subtitles">Subtitles</option>
+          <option value="both">Both audio and subtitles</option>
+        </select>
+      </div>
+      <div>
+        <label for="missingType">Media type</label>
+        <select id="missingType"><option value="all">Movies and series</option><option value="movie">Movies only</option><option value="show">Series only</option></select>
+      </div>
+      <div>
+        <label for="missingSort">Sort by</label>
+        <select id="missingSort"><option value="missing">Most missing first</option><option value="title">Title</option></select>
+      </div>
+    </div>
+    <div class="actions">
+      <button id="missingCsv" type="button">Download CSV</button>
+      <button id="missingBazarr" type="button" disabled>Search Bazarr for missing subtitles</button>
+    </div>
+    <div id="missingMeta" class="browse-meta"></div>
+    <div class="profile-map" id="labelPanel">
+      <strong id="labelHeading">Plex label</strong>
+      <p id="labelSummary" class="meta">Loading…</p>
+      <div class="actions"><button id="labelSync" type="button" disabled>Add label in Plex</button></div>
+      <details id="labelDetails" class="hidden"><summary>Titles that would change</summary><ul id="labelList"></ul></details>
+    </div>
+    <ul class="results" id="missingResults"></ul>
+  </section>
+
+  <section id="bazarrPanel" class="hidden">
+    <h2>Bazarr</h2>
     <div id="bazarrResult" class="msg"></div>
     <div id="bazarrPreview" class="bulk-preview hidden">
       <h3>Bulk operation preview</h3>
@@ -138,7 +185,6 @@
       <p class="meta">Profile changes affect the media item globally in Bazarr, not just the selected Plex Home user. Searches may download subtitles.</p>
     </div>
     <div id="bazarrJob" class="msg"><span id="bazarrJobText"></span><div class="actions"><button id="bazarrCancelJob" type="button" class="hidden">Cancel job</button><button id="bazarrRetryJob" type="button" class="hidden">Retry failed titles</button><button id="bazarrHistory" type="button">View job history</button></div><div id="bazarrJobDetails"></div></div>
-    <ul class="results" id="browseResults"></ul>
   </section>
 
   <section id="langSection" class="hidden">
@@ -177,7 +223,11 @@ async function loadUsers() {
   } catch (e) { $('user').innerHTML = `<option>Error: ${esc(e.message)}</option>`; }
 }
 
-$('user').addEventListener('change', () => { if (current) selectTitle(current); if (!$('browseSection').classList.contains('hidden')) loadBrowseLanguages(false); });
+$('user').addEventListener('change', () => {
+  if (current) selectTitle(current);
+  if (currentPage === 'browse') loadBrowseLanguages(false);
+  if (currentPage === 'missing') loadMissing();
+});
 
 $('searchForm').addEventListener('submit', async (ev) => {
   ev.preventDefault();
@@ -247,24 +297,132 @@ $('preview').onclick = () => run(true);
 $('apply').onclick = () => run(false);
 
 
+let currentPage = 'search';
+let config = { focus_language: 'ita', focus_name: 'Italian', bazarr_configured: false, labels: { label: 'Italian' } };
+
 function showPage(page) {
-  const browsing = page === 'browse';
-  $('searchSection').classList.toggle('hidden', browsing);
-  $('browseSection').classList.toggle('hidden', !browsing);
+  currentPage = page;
+  for (const name of ['search', 'browse', 'missing']) {
+    $(`${name}Section`).classList.toggle('hidden', page !== name);
+    $(`${name}Tab`).setAttribute('aria-selected', String(page === name));
+  }
   $('langSection').classList.add('hidden');
-  $('searchTab').setAttribute('aria-selected', String(!browsing));
-  $('browseTab').setAttribute('aria-selected', String(browsing));
-  if (browsing) loadBrowseLanguages(false);
+  $('bazarrPanel').classList.toggle('hidden', page === 'search' || !config.bazarr_configured);
+  if (page === 'browse') loadBrowseLanguages(false);
+  if (page === 'missing') { loadMissing(); loadLabelPlan(); }
 }
 $('searchTab').onclick = () => showPage('search');
 $('browseTab').onclick = () => showPage('browse');
+$('missingTab').onclick = () => showPage('missing');
+$('missingKind').onchange = () => loadMissing();
+$('missingType').onchange = () => loadMissing();
+$('missingSort').onchange = () => loadMissing();
+$('missingCsv').onclick = () => { window.location = `/api/missing?${missingParams()}&format=csv`; };
+$('missingBazarr').onclick = () => runBazarrSearch('missing-subtitles');
+$('labelSync').onclick = () => syncLabels();
+
+async function loadConfig() {
+  try { config = await api('/api/config'); } catch (_) { return; }
+  const name = config.focus_name;
+  $('missingTab').textContent = `Missing ${name}`;
+  $('missingHeading').textContent = `Missing ${name}`;
+  $('missingIntro').textContent = `Series and movies without ${name}, or with it in only some episodes. Select one to configure it.`;
+  $('labelHeading').textContent = `Plex label "${config.labels.label}"`;
+}
+
+function ago(ts) {
+  const s = Math.max(0, Math.round(Date.now() / 1000 - ts));
+  if (s < 90) return 'just now';
+  if (s < 5400) return `${Math.round(s / 60)} min ago`;
+  if (s < 129600) return `${Math.round(s / 3600)} h ago`;
+  return `${Math.round(s / 86400)} days ago`;
+}
+
+let indexWasRunning = false;
+async function pollIndex() {
+  let delay = 30000;
+  try {
+    const { index: i, labels } = await api('/api/index/status');
+    const parts = [];
+    if (i.ready) parts.push(`Library index: ${i.titles} titles, updated ${ago(i.built_at)}.`);
+    else parts.push('Building the library index for the first time. Pages fill in as each library finishes.');
+    if (i.state === 'running') {
+      parts.push(`${i.mode === 'full' ? 'Full rescan' : 'Checking for changes'}: ${i.phase}${i.total ? ` (${i.done}/${i.total})` : ''}…`);
+      delay = 3000;
+    }
+    if (labels && labels.state === 'running') { parts.push(`Labelling ${labels.done}/${labels.total}…`); delay = 3000; }
+    if (i.last_error) parts.push(`Last refresh error: ${i.last_error}`);
+    const pct = i.state === 'running' && i.total ? Math.round(100 * i.done / i.total) : null;
+    $('indexStatus').innerHTML = esc(parts.join(' ')) + (pct !== null ? `<div class="bar"><span style="width:${pct}%"></span></div>` : '');
+    // When a refresh finishes, reload whatever page is open so it shows new data.
+    if (indexWasRunning && i.state !== 'running') {
+      if (currentPage === 'browse') loadBrowseLanguages(false);
+      if (currentPage === 'missing') { loadMissing(); loadLabelPlan(); }
+    }
+    indexWasRunning = i.state === 'running' || (labels && labels.state === 'running');
+  } catch (e) { $('indexStatus').textContent = `Library index status unavailable: ${e.message}`; }
+  setTimeout(pollIndex, delay);
+}
+
+function missingParams() {
+  return new URLSearchParams({ user: $('user').value, language: config.focus_language,
+    kind: $('missingKind').value, type: $('missingType').value, sort: $('missingSort').value });
+}
+
+async function loadMissing() {
+  $('missingResults').innerHTML = '<li class="meta">Loading…</li>';
+  try {
+    const d = await api(`/api/missing?${missingParams()}`);
+    $('missingResults').innerHTML = '';
+    if (!d.ready) {
+      $('missingMeta').textContent = 'The library index is still being built; results appear here as it fills in.';
+    } else {
+      $('missingMeta').textContent = `${d.results.length} title(s) missing ${config.focus_name} ${({either: 'audio or subtitles', both: 'audio and subtitles'})[d.kind] || d.kind}.`;
+    }
+    $('missingBazarr').disabled = !config.bazarr_configured || !d.results.length || d.kind === 'audio';
+    $('missingBazarr').title = config.bazarr_configured ? '' : 'Set BAZARR_URL and BAZARR_API_KEY to enable.';
+    for (const it of d.results) {
+      const li = document.createElement('li'); li.className = 'result-row';
+      const b = document.createElement('button');
+      b.innerHTML = `${esc(it.title)} <span class="meta">${it.year ?? ''} · ${it.type === 'show' ? 'Series' : 'Movie'}</span>`;
+      b.onclick = () => { showPage('search'); selectTitle(it); };
+      const fmt = (n) => it.type === 'movie' ? (n ? 'yes' : 'none') : (n === 0 ? 'none' : `${n}/${it.total}`);
+      const detail = document.createElement('span'); detail.className = 'coverage';
+      detail.textContent = `Audio ${fmt(it.audio)} · Subs ${fmt(it.subtitles)}`;
+      li.append(b, detail); $('missingResults').appendChild(li);
+    }
+  } catch (e) { $('missingResults').innerHTML = `<li class="msg err">${esc(e.message)}</li>`; }
+}
+
+async function loadLabelPlan() {
+  $('labelSync').disabled = true; $('labelDetails').classList.add('hidden');
+  try {
+    const p = await api('/api/labels/plan');
+    const crit = { any: 'audio or subtitles', audio: 'audio', subtitles: 'subtitles' }[p.criteria];
+    $('labelSummary').textContent = `${p.qualifying} title(s) have ${config.focus_name} ${crit}; ${p.labelled} already carry the label. ` +
+      `${p.add.length} to add${p.remove_stale ? `, ${p.remove.length} to remove` : ''}. ` +
+      `In Plex, filter a library by Label → ${p.label} or build a smart collection on it. Labels are shared by all users.`;
+    const rows = [...p.add.map(r => `+ ${r.title}`), ...(p.remove_stale ? p.remove.map(r => `− ${r.title}`) : [])];
+    $('labelList').innerHTML = rows.map(r => `<li>${esc(r)}</li>`).join('');
+    $('labelDetails').classList.toggle('hidden', !rows.length);
+    $('labelSync').disabled = !rows.length;
+    $('labelSync').textContent = rows.length ? `Update labels in Plex (${rows.length})` : 'Labels are up to date';
+  } catch (e) { $('labelSummary').textContent = e.message; }
+}
+
+async function syncLabels() {
+  if (!confirm(`Update the "${config.labels.label}" label in Plex for the listed titles? Labels are visible to every user.`)) return;
+  $('labelSync').disabled = true;
+  try { await api('/api/labels/sync', { method: 'POST' }); $('labelSummary').textContent = 'Labelling in the background…'; indexWasRunning = true; }
+  catch (e) { $('labelSummary').textContent = e.message; }
+}
 $('browseKind').onchange = () => loadBrowseLanguages(false);
 $('browseType').onchange = () => { updateBrowseSortOptions(); loadBrowseResults(); };
 $('browseLanguage').onchange = () => { syncBazarrMappingSelection(); loadBrowseResults(); };
 $('browseSort').onchange = () => loadBrowseResults();
 $('browseOrder').onchange = () => loadBrowseResults();
 $('refreshBrowse').onclick = () => loadBrowseLanguages(true);
-$('bazarrSearch').onclick = () => runBazarrSearch();
+$('bazarrSearch').onclick = () => runBazarrSearch('audio');
 $('bazarrSelectAll').onchange = () => document.querySelectorAll('.bazarr-select-item').forEach(x => x.checked = $('bazarrSelectAll').checked);
 $('bazarrStartSelected').onclick = () => startSelectedBazarrJob();
 $('bazarrCancelJob').onclick = () => cancelBazarrJob();
@@ -381,15 +539,17 @@ async function loadBrowseLanguages(refresh) {
   $('browseLanguage').innerHTML = '<option value="">Indexing library…</option>';
   $('browseResults').innerHTML = '';
   $('browseMeta').textContent = refresh
-    ? 'Refreshing the language index. This may take several minutes for large libraries…'
-    : 'Loading the language index. The first scan can take several minutes…';
+    ? 'Full rescan started in the background. Current results stay available meanwhile.'
+    : 'Loading…';
   try {
     const d = await api(`/api/browse/languages?user=${encodeURIComponent(user)}&kind=${kind}${refresh ? '&refresh=1' : ''}`);
+    if (refresh) indexWasRunning = true;
     $('browseLanguage').innerHTML = '<option value="">Choose a language…</option>' +
       d.languages.map(o => `<option value="${esc(o.code)}">${esc(o.name)} (${esc(o.code)}) · ${o.titles} titles</option>`).join('');
     $('browseLanguage').disabled = !d.languages.length;
-    const built = new Date(d.built_at * 1000).toLocaleString();
-    $('browseMeta').textContent = `Indexed ${d.indexed} of ${d.scanned} titles. ${d.errors ? `${d.errors} item(s) could not be inspected.` : 'No indexing errors.'} Cached for 24 hours (built ${built}).`;
+    $('browseMeta').textContent = d.ready
+      ? `${d.indexed} titles indexed${d.errors ? `; ${d.errors} item(s) could not be read` : ''}. Updated ${ago(d.built_at)}; changes are picked up in the background.`
+      : 'The library index is still being built. This page refreshes itself as libraries finish.';
     window.bazarrConfigured = !!d.bazarr_configured;
     $('bazarrSearch').disabled = !d.bazarr_configured || kind !== 'audio' || !d.languages.length || !$('browseLanguage').value;
     $('bazarrHint').textContent = !d.bazarr_configured
@@ -449,19 +609,21 @@ async function loadBrowseResults() {
   }
 }
 
-async function runBazarrSearch() {
-  const language = $('browseLanguage').value;
-  if (!language || $('browseKind').value !== 'audio') return;
+async function runBazarrSearch(selection = 'audio') {
+  const missingMode = selection === 'missing-subtitles';
+  const language = missingMode ? config.focus_language : $('browseLanguage').value;
+  const mediaType = missingMode ? $('missingType').value : $('browseType').value;
+  if (!language || (!missingMode && $('browseKind').value !== 'audio')) return;
   $('bazarrSearch').disabled = true;
   $('bazarrPreview').classList.add('hidden');
   $('bazarrResult').textContent = 'Preparing a read-only preview from Plex and Bazarr…';
   try {
     const d = await api('/api/browse/bazarr-preview', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user: $('user').value, language, type: $('browseType').value })
+      body: JSON.stringify({ user: $('user').value, language, type: mediaType, selection })
     });
     window.currentBazarrPreview = d;
-    $('bazarrPreviewSummary').textContent = `${d.selected_count} Plex title(s) matched the audio language; ${d.matched_count} matched uniquely in Bazarr; ${d.unmatched.length} could not be matched. ${d.profile_changes} global profile assignment(s) would change.`;
+    $('bazarrPreviewSummary').textContent = `${d.selected_count} Plex title(s) ${missingMode ? `are missing ${config.focus_name} subtitles` : 'matched the audio language'}; ${d.matched_count} matched uniquely in Bazarr; ${d.unmatched.length} could not be matched. ${d.profile_changes} global profile assignment(s) would change.`;
     $('bazarrPreviewItems').innerHTML = '';
     for (const item of d.candidates) {
       const row = document.createElement('div'); row.className = 'bulk-item';
@@ -567,6 +729,8 @@ async function retryBazarrJob() {
 }
 
 loadUsers();
+loadConfig();
+pollIndex();
 </script>
 </body>
 </html>
