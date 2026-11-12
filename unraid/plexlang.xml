@@ -26,6 +26,17 @@
   <Config Name="Plex concurrency" Target="PLEX_CONCURRENCY" Default="4" Description="Parallel requests to Plex while indexing." Type="Variable" Display="advanced" Required="false" Mask="false">4</Config>
   <Config Name="Bazarr URL" Target="BAZARR_URL" Default="" Description="Optional, e.g. http://UNRAID-IP:6767" Type="Variable" Display="always" Required="false" Mask="false"></Config>
   <Config Name="Bazarr API key" Target="BAZARR_API_KEY" Default="" Description="Optional. Bazarr Settings, General, API key." Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="Sonarr URL" Target="SONARR_URL" Default="" Description="Optional, e.g. http://UNRAID-IP:8989" Type="Variable" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="Sonarr API key" Target="SONARR_API_KEY" Default="" Description="Sonarr Settings, General, API key." Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="Sonarr Italian profile" Target="SONARR_ITALIAN_PROFILE" Default="" Description="Quality profile (name or id) to switch series to before searching. Empty = best Italian-ready profile found." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Radarr URL" Target="RADARR_URL" Default="" Description="Optional, e.g. http://UNRAID-IP:7878" Type="Variable" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="Radarr API key" Target="RADARR_API_KEY" Default="" Description="Radarr Settings, General, API key." Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="Radarr Italian profile" Target="RADARR_ITALIAN_PROFILE" Default="" Description="Quality profile (name or id) to switch movies to before searching. Empty = best Italian-ready profile found." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Seerr URL" Target="SEERR_URL" Default="" Description="Optional Overseerr/Jellyseerr, e.g. http://UNRAID-IP:5055" Type="Variable" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="Seerr API key" Target="SEERR_API_KEY" Default="" Description="Seerr Settings, General, API key." Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="Seerr Sonarr server" Target="SEERR_SONARR_SERVER" Default="" Description="Seerr Sonarr server (name or id) for Italian requests. Empty = default." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Seerr Radarr server" Target="SEERR_RADARR_SERVER" Default="" Description="Seerr Radarr server (name or id) for Italian requests. Empty = default." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Request via" Target="ARR_REQUEST_VIA" Default="auto" Description="auto = Sonarr/Radarr if they manage the title, else Seerr. arr or seerr to force one." Type="Variable" Display="advanced" Required="false" Mask="false">auto</Config>
   <Config Name="PUID" Target="PUID" Default="99" Description="User ID that owns the appdata files." Type="Variable" Display="advanced" Required="false" Mask="false">99</Config>
   <Config Name="PGID" Target="PGID" Default="100" Description="Group ID that owns the appdata files." Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
 </Container>

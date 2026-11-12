@@ -203,6 +203,16 @@ class LibraryIndex:
         """Current snapshot: one dict per show/movie with language counts."""
         return self._snapshot
 
+    def episodes_missing(self, key: str, language: str, kind: str = "audio") -> list[tuple]:
+        """(season, episode) of a show's items lacking a language, for Sonarr."""
+        aliases = language_aliases(language)
+        field = "a" if kind == "audio" else "s"
+        with self._lock:
+            items = dict(self._data.get("titles", {}).get(key, {}).get("items", {}))
+        return sorted(tuple(item["se"]) for item in items.values()
+                      if item.get("se") and None not in item["se"]
+                      and not aliases.intersection(item.get(field, [])))
+
     def info(self) -> dict:
         data = self._data
         built = int(data.get("built_at") or 0)
@@ -392,7 +402,12 @@ class LibraryIndex:
                     audio, subs, _ = _languages(full_ep, names)
                     items[ek] = {"sig": _signature(ep), "a": audio, "s": subs}
                 elif ek in prev_items:
-                    items[ek] = prev_items[ek]
+                    items[ek] = dict(prev_items[ek])
+                else:
+                    continue
+                # Season/episode numbers come from the cheap listing, so they're
+                # always current; Sonarr matches episodes by them.
+                items[ek]["se"] = [_int(ep.get("parentIndex")), _int(ep.get("index"))]
             show_detail = details.get(key)
             new[key] = {
                 "key": key, "title": show.get("title"), "year": _year(show),
@@ -425,6 +440,13 @@ class LibraryIndex:
             self._wake.clear()
             self.refresh(full=full)
             self._wake.wait(self.refresh_seconds)
+
+
+def _int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _year(elem):

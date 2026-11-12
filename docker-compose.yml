@@ -18,3 +18,13 @@ services:
       REFRESH_MINUTES: "30"                    # how often to check Plex for changes
       # BAZARR_URL: "http://192.168.1.10:6767"
       # BAZARR_API_KEY: "change-me"
+      # Optional: request Italian versions (see README, "Get an Italian version")
+      # SONARR_URL: "http://192.168.1.10:8989"
+      # SONARR_API_KEY: "change-me"
+      # SONARR_ITALIAN_PROFILE: "HD - Italian"   # profile name or id; omit to auto-pick
+      # RADARR_URL: "http://192.168.1.10:7878"
+      # RADARR_API_KEY: "change-me"
+      # RADARR_ITALIAN_PROFILE: "HD - Italian"
+      # SEERR_URL: "http://192.168.1.10:5055"
+      # SEERR_API_KEY: "change-me"
+      # ARR_REQUEST_VIA: "auto"                  # auto | arr | seerr

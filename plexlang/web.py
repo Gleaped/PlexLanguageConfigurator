@@ -23,6 +23,7 @@ from .profile_mappings import ProfileMappingStore
 from .bazarr_profiles import suggest_profiles
 from .index import LibraryIndex, coverage, language_aliases, visible_keys
 from .labels import LabelSync, _env_bool
+from .acquire import Acquirer, clients_from_env
 
 CACHE_SECONDS = 300
 VISIBILITY_SECONDS = 1800  # how long a Home user's visible-title list is reused
@@ -100,12 +101,14 @@ class PlexSession:
     def __init__(self, url: str, token: str, connect=plex_client.connect,
                  bazarr: BazarrClient | None = None,
                  profile_mappings: ProfileMappingStore | None = None,
-                 index: LibraryIndex | None = None):
+                 index: LibraryIndex | None = None, arr_clients=None):
         self.url, self.token, self._connect = url, token, connect
         self.focus_language = os.environ.get("FOCUS_LANGUAGE", "ita").strip().lower() or "ita"
         self.auto_label = _env_bool("AUTO_LABEL", False)
         self.index = index or LibraryIndex(self.admin, after_refresh=self._after_index_refresh)
         self.labels = LabelSync(self.admin, self.index, language=self.focus_language)
+        sonarr, radarr, seerr = arr_clients if arr_clients is not None else clients_from_env()
+        self.acquirer = Acquirer(self.index, sonarr, radarr, seerr, language=self.focus_language)
         self._visible: dict[str, tuple[float, set | None]] = {}
         self._visible_refreshing: set[str] = set()
         self.bazarr = bazarr
@@ -691,7 +694,48 @@ def create_app(session: PlexSession | None = None) -> Flask:
         code = session.focus_language
         return jsonify(focus_language=code, focus_name=FOCUS_NAMES.get(code, code),
                        bazarr_configured=session.bazarr is not None,
+                       arr_configured=session.acquirer.configured,
                        auto_label=session.auto_label, labels=session.labels.config())
+
+    @app.get("/api/arr/config")
+    def arr_config():
+        """Read-only check of Sonarr/Radarr/Seerr setup for getting Italian releases."""
+        if not session.acquirer.configured:
+            return jsonify(error="Set SONARR_URL/SONARR_API_KEY, RADARR_URL/RADARR_API_KEY "
+                                 "or SEERR_URL/SEERR_API_KEY."), 503
+        return jsonify(session.acquirer.config_report(force=request.args.get("refresh") == "1"))
+
+    @app.post("/api/arr/preview")
+    def arr_preview():
+        if not session.acquirer.configured:
+            return jsonify(error="Sonarr, Radarr and Seerr are not configured."), 503
+        body = request.get_json(force=True) or {}
+        user = str(body.get("user") or "")
+        keys = {str(k) for k in body.get("keys") or []}
+        kind = body.get("kind", "audio")
+        if kind not in ("audio", "subtitles"):
+            kind = "audio"
+        if not user or not keys:
+            return jsonify(error="user and keys are required."), 400
+        titles = [t for t in session.browse_index(user)["titles"] if t["key"] in keys]
+        return jsonify(session.acquirer.preview(titles, kind))
+
+    @app.post("/api/arr/jobs")
+    def arr_start():
+        body = request.get_json(force=True) or {}
+        try:
+            started = session.acquirer.start(str(body.get("preview_id") or ""), body.get("keys") or [],
+                                             change_profiles=bool(body.get("change_profiles", True)))
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+        return jsonify(started), 202
+
+    @app.get("/api/arr/jobs/<job_id>")
+    def arr_job(job_id):
+        job = session.acquirer.jobs.get(job_id)
+        if not job:
+            return jsonify(error="Job not found."), 404
+        return jsonify(job)
 
     @app.get("/api/index/status")
     def index_status():

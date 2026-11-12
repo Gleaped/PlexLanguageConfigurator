@@ -170,6 +170,21 @@
       <div class="actions"><button id="labelSync" type="button" disabled>Add label in Plex</button></div>
       <details id="labelDetails" class="hidden"><summary>Titles that would change</summary><ul id="labelList"></ul></details>
     </div>
+    <div class="profile-map hidden" id="arrPanel">
+      <strong>Get an Italian version</strong>
+      <p class="meta">Tick titles below, then preview. Sonarr searches only the episodes without Italian; Radarr searches the movie; titles they don't manage go to Seerr. Nothing changes until you start.</p>
+      <details id="arrSetup"><summary>Setup check (Sonarr / Radarr / Seerr)</summary><div id="arrSetupBody" class="meta">Loading…</div></details>
+      <div class="actions">
+        <label style="margin:0;font-weight:normal"><input type="checkbox" id="arrSelectAll" style="width:auto"> Select all listed</label>
+        <button id="arrPreviewBtn" type="button" disabled>Preview request</button>
+      </div>
+      <div id="arrPreview" class="hidden">
+        <div id="arrPreviewItems"></div>
+        <label style="font-weight:normal"><input type="checkbox" id="arrChangeProfiles" checked style="width:auto"> Switch titles to the Italian quality profile where shown</label>
+        <div class="actions"><button id="arrStart" type="button" class="primary">Start requests</button></div>
+      </div>
+      <div id="arrJob" class="msg"></div>
+    </div>
     <ul class="results" id="missingResults"></ul>
   </section>
 
@@ -320,6 +335,84 @@ $('missingSort').onchange = () => loadMissing();
 $('missingCsv').onclick = () => { window.location = `/api/missing?${missingParams()}&format=csv`; };
 $('missingBazarr').onclick = () => runBazarrSearch('missing-subtitles');
 $('labelSync').onclick = () => syncLabels();
+$('arrSelectAll').onchange = () => { document.querySelectorAll('.arr-pick').forEach(x => x.checked = $('arrSelectAll').checked); updateArrButton(); };
+$('arrPreviewBtn').onclick = () => arrPreview();
+$('arrStart').onclick = () => arrStart();
+$('arrSetup').addEventListener('toggle', () => { if ($('arrSetup').open) loadArrSetup(); });
+
+function updateArrButton() {
+  const n = document.querySelectorAll('.arr-pick:checked').length;
+  $('arrPreviewBtn').disabled = !n;
+  $('arrPreviewBtn').textContent = n ? `Preview request (${n})` : 'Preview request';
+}
+
+async function loadArrSetup() {
+  const body = $('arrSetupBody');
+  body.textContent = 'Reading Sonarr / Radarr / Seerr settings…';
+  try {
+    const d = await api('/api/arr/config');
+    const out = [];
+    for (const name of ['sonarr', 'radarr']) {
+      const r = d[name];
+      if (!r.configured) { out.push(`<p><strong>${name}</strong>: not configured.</p>`); continue; }
+      if (r.error) { out.push(`<p><strong>${name}</strong>: <span class="warn">${esc(r.error)}</span></p>`); continue; }
+      const profiles = r.profiles.map(p => `<li>${esc(p.name)} — Italian score ${p.italian_score}` +
+        (p.italian_formats.length ? ` (${p.italian_formats.map(f => esc(f.name) + ' ' + f.score).join(', ')})` : '') +
+        (p.ready ? ' <span class="ok">ready</span>' : '') +
+        (p.problems.length ? `<br>${p.problems.map(esc).join('<br>')}` : '') + '</li>').join('');
+      out.push(`<p><strong>${name} ${esc(r.version)}</strong>: ${r.managed} titles. Italian profile used: ` +
+        `${r.target_profile ? esc(r.target_profile.name) : '<span class="warn">none (titles keep their own profile)</span>'}</p>` +
+        r.warnings.map(w => `<p class="warn">${esc(w)}</p>`).join('') + `<ul>${profiles}</ul>`);
+    }
+    const s = d.seerr;
+    if (!s.configured) out.push('<p><strong>seerr</strong>: not configured.</p>');
+    else if (s.error) out.push(`<p><strong>seerr</strong>: <span class="warn">${esc(s.error)}</span></p>`);
+    else out.push(`<p><strong>seerr ${esc(s.version || '')}</strong>: ` +
+      [...s.sonarr_servers.map(x => `Sonarr "${esc(x.name)}"`), ...s.radarr_servers.map(x => `Radarr "${esc(x.name)}"`)].join(', ') + '</p>');
+    out.push(`<p>Request mode: ${esc(d.mode)}</p>`);
+    body.innerHTML = out.join('');
+  } catch (e) { body.textContent = e.message; }
+}
+
+async function arrPreview() {
+  const keys = [...document.querySelectorAll('.arr-pick:checked')].map(x => x.value);
+  if (!keys.length) return;
+  $('arrJob').textContent = 'Checking Sonarr / Radarr / Seerr…';
+  $('arrPreview').classList.add('hidden');
+  try {
+    const kind = $('missingKind').value === 'subtitles' ? 'subtitles' : 'audio';
+    const d = await api('/api/arr/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user: $('user').value, keys, kind }) });
+    window.arrPreviewData = d;
+    $('arrPreviewItems').innerHTML = d.rows.map(r => `<div class="bulk-item"><input type="checkbox" class="arr-run" value="${esc(r.key)}" ${r.service ? 'checked' : 'disabled'}>` +
+      `<div><strong>${esc(r.title)}</strong> <span class="status-pill">${esc(r.service || 'skip')}</span>` +
+      `<small>${esc(r.action)}${r.current_profile ? ` · profile ${esc(r.current_profile)}${r.profile_change ? ' → ' + esc(r.target_profile) : ''}` : ''}</small>` +
+      (r.problems || []).map(p => `<small class="warn">${esc(p)}</small>`).join('') + '</div></div>').join('');
+    $('arrPreview').classList.remove('hidden');
+    $('arrJob').textContent = `${d.actionable} of ${d.rows.length} title(s) can be requested; ${d.profile_changes} profile change(s). Nothing has been sent yet.`;
+  } catch (e) { showError($('arrJob'), e); }
+}
+
+async function arrStart() {
+  const d = window.arrPreviewData; if (!d) return;
+  const keys = [...document.querySelectorAll('.arr-run:checked')].map(x => x.value);
+  if (!keys.length) return;
+  const change = $('arrChangeProfiles').checked;
+  if (!confirm(`Send ${keys.length} request(s)?${change && d.profile_changes ? ' Quality profiles will change in Sonarr/Radarr for the listed titles.' : ''} Downloads may start and existing files may be replaced.`)) return;
+  $('arrStart').disabled = true;
+  try {
+    const job = await api('/api/arr/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ preview_id: d.preview_id, keys, change_profiles: change }) });
+    for (let i = 0; i < 600; i++) {
+      const j = await api(`/api/arr/jobs/${job.job_id}`);
+      $('arrJob').innerHTML = `Requests ${esc(j.status)}: ${j.completed}/${j.total}` + (j.results.length ?
+        `<ul>${j.results.map(r => `<li>${esc(r.title)}: ${r.status === 'success' ? esc(r.detail) : `<span class="warn">${esc(r.error)}</span>`}</li>`).join('')}</ul>` : '');
+      if (j.status === 'completed') break;
+      await new Promise(res => setTimeout(res, 1500));
+    }
+  } catch (e) { showError($('arrJob'), e); }
+  $('arrStart').disabled = false;
+}
 
 async function loadConfig() {
   try { config = await api('/api/config'); } catch (_) { return; }
@@ -371,6 +464,8 @@ function missingParams() {
 
 async function loadMissing() {
   $('missingResults').innerHTML = '<li class="meta">Loading…</li>';
+  $('arrPanel').classList.toggle('hidden', !config.arr_configured);
+  $('arrSelectAll').checked = false; updateArrButton();
   try {
     const d = await api(`/api/missing?${missingParams()}`);
     $('missingResults').innerHTML = '';
@@ -389,6 +484,11 @@ async function loadMissing() {
       const fmt = (n) => it.type === 'movie' ? (n ? 'yes' : 'none') : (n === 0 ? 'none' : `${n}/${it.total}`);
       const detail = document.createElement('span'); detail.className = 'coverage';
       detail.textContent = `Audio ${fmt(it.audio)} · Subs ${fmt(it.subtitles)}`;
+      if (config.arr_configured) {
+        const pick = document.createElement('input'); pick.type = 'checkbox'; pick.className = 'arr-pick';
+        pick.value = it.key; pick.style.width = 'auto'; pick.onchange = updateArrButton;
+        li.prepend(pick);
+      }
       li.append(b, detail); $('missingResults').appendChild(li);
     }
   } catch (e) { $('missingResults').innerHTML = `<li class="msg err">${esc(e.message)}</li>`; }
